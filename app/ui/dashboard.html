@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>晴屿 · 智能天气</title>
+<style>
+:root{
+  --bg0:#050a16; --bg1:#0b1830; --bg2:#12294a;
+  --card:rgba(16,32,56,.55); --card-brd:rgba(150,190,230,.14);
+  --glass-hi:rgba(255,255,255,.05);
+  --tx:#eef4fb; --dim:#8fa6c0; --faint:#5c7591;
+  --gold:#ffd9a0; --amber:#ffb25e; --ember:#ff7a59;
+  --rose:#ff5d73; --ice:#7fd4ff; --good:#6fe3b0; --violet:#8b7cf6;
+  --serif:Georgia,"STZhongsong","SimSun","Songti SC",serif;
+  --sans:"Microsoft YaHei UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --mono:"Cascadia Code","Consolas","SFMono-Regular",monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  font-family:var(--sans); color:var(--tx); background:var(--bg0);
+  overflow-x:hidden; -webkit-font-smoothing:antialiased;
+  user-select:none;
+}
+/* ============ 天空背景 ============ */
+.sky{position:fixed;inset:0;z-index:-3;
+  background:
+    radial-gradient(120% 90% at 50% 0%, #132c52 0%, #0b1a33 42%, #060d1c 100%);
+  transition:background 2s ease;
+}
+.sky::before{content:"";position:absolute;inset:0;opacity:.5;
+  background:
+    radial-gradient(38% 30% at 78% 22%, rgba(255,178,94,.16), transparent 70%),
+    radial-gradient(30% 26% at 18% 78%, rgba(127,212,255,.10), transparent 70%);}
+.grain{position:fixed;inset:0;z-index:-2;opacity:.13;pointer-events:none;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)' opacity='.6'/%3E%3C/svg%3E");}
+.stars{position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background-image:
+    radial-gradient(1.3px 1.3px at 12% 16%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 26% 7%, #cfe8ff 50%, transparent 51%),
+    radial-gradient(1.5px 1.5px at 40% 24%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 55% 10%, #ffd9a0 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 68% 20%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 82% 9%, #e8f4ff 50%, transparent 51%),
+    radial-gradient(1.6px 1.6px at 92% 28%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 8% 42%, #fff 50%, transparent 51%),
+    radial-gradient(1.2px 1.2px at 30% 50%, #dce9ff 50%, transparent 51%),
+    radial-gradient(1px 1px at 72% 44%, #fff 50%, transparent 51%),
+    radial-gradient(1px 1px at 52% 58%, #ffd9a0 50%, transparent 51%),
+    radial-gradient(1.4px 1.4px at 88% 62%, #fff 50%, transparent 51%);
+  animation:twinkle 6s ease-in-out infinite alternate;}
+@keyframes twinkle{from{opacity:.3}to{opacity:.95}}
+
+.wrap{max-width:1180px;margin:0 auto;padding:26px 24px 20px;position:relative}
+/* ============ 顶栏 ============ */
+.masthead{display:flex;align-items:flex-end;justify-content:space-between;
+  padding-bottom:18px;border-bottom:1px solid var(--card-brd);margin-bottom:22px}
+.brand{font-family:var(--serif);font-size:30px;letter-spacing:.16em;font-weight:700}
+.brand small{display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.5em;
+  color:var(--faint);margin-top:5px}
+.mast-right{text-align:right}
+.city{font-size:26px;font-weight:700;letter-spacing:.1em;color:var(--gold);
+  font-family:var(--serif)}
+.city-sub{font-family:var(--mono);font-size:10.5px;color:var(--dim);
+  letter-spacing:.12em;margin-top:5px;min-height:14px}
+.city-select{font-family:var(--sans);font-size:12px;color:var(--tx);letter-spacing:.04em;
+  background:var(--card);border:1px solid var(--card-brd);border-radius:12px;
+  padding:8px 12px;cursor:pointer;outline:none;max-width:190px}
+.city-select option{background:#0d1c30;color:var(--tx)}
+.clock{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.14em;margin-top:6px}
+.clock b{color:var(--tx);font-size:15px;font-weight:600}
+
+.toolbar{display:flex;gap:10px;margin-bottom:20px;padding-bottom:14px;
+  border-bottom:1px solid rgba(150,190,230,.08);flex-wrap:wrap;align-items:center}
+.tbtn{font-family:var(--sans);font-size:12.5px;color:var(--tx);letter-spacing:.06em;
+  background:var(--card);border:1px solid var(--card-brd);border-radius:12px;
+  padding:9px 16px;cursor:pointer;transition:all .22s ease;backdrop-filter:blur(8px)}
+.tbtn:hover{background:rgba(255,178,94,.14);border-color:rgba(255,178,94,.5);transform:translateY(-1px)}
+.tbtn:active{transform:scale(.97)}
+.tbtn.primary{background:linear-gradient(120deg,rgba(255,178,94,.2),rgba(255,122,89,.12));
+  border-color:rgba(255,178,94,.45)}
+.tbtn.active{border-color:var(--amber);color:var(--gold)}
+.search{display:flex;gap:0;border:1px solid var(--card-brd);border-radius:12px;overflow:hidden;
+  background:var(--card);backdrop-filter:blur(8px)}
+.search input{border:none;outline:none;background:transparent;color:var(--tx);
+  font-family:var(--sans);font-size:12.5px;padding:9px 14px;width:200px}
+.search button{border:none;background:transparent;color:var(--amber);cursor:pointer;
+  padding:0 14px;font-size:14px}
+.hist{display:flex;gap:8px;flex-wrap:wrap}
+.hist .tag{font-size:11px;font-family:var(--mono);color:var(--dim);cursor:pointer;
+  padding:6px 12px;border:1px dashed var(--card-brd);border-radius:99px;transition:all .2s}
+.hist .tag:hover{color:var(--gold);border-color:var(--amber)}
+.spacer{flex:1}
+.status{font-size:11.5px;color:var(--dim);font-family:var(--mono);letter-spacing:.05em}
+
+/* ============ 卡片 ============ */
+.grid{display:grid;gap:18px;margin-bottom:18px}
+.g-hero{grid-template-columns:1.35fr .65fr}
+.g-map{grid-template-columns:1.15fr .85fr}
+.g-fc{grid-template-columns:repeat(3,1fr)}
+.g-low{grid-template-columns:1fr 1fr}
+.g-rec{grid-template-columns:1fr 1.1fr}
+.card{position:relative;background:var(--card);border:1px solid var(--card-brd);
+  border-radius:20px;padding:22px 24px;backdrop-filter:blur(18px);
+  box-shadow:0 24px 60px rgba(0,0,0,.35), inset 0 1px 0 rgba(255,255,255,.05);
+  overflow:hidden;animation:rise .7s cubic-bezier(.2,.8,.2,1) both;
+  transition:border-color .25s ease, transform .25s ease, box-shadow .25s ease}
+.card:hover{border-color:rgba(255,178,94,.32);transform:translateY(-2px);
+  box-shadow:0 30px 70px rgba(0,0,0,.42), 0 0 24px rgba(255,178,94,.06)}
+.card::before{content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(115deg,rgba(255,255,255,.06) 0%,transparent 45%)}
+@keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:translateY(0)}}
+.sec-tag{font-family:var(--mono);font-size:10px;letter-spacing:.42em;color:var(--faint);
+  text-transform:uppercase;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.sec-tag::before{content:"";width:7px;height:7px;border-radius:50%;flex:0 0 auto;
+  background:linear-gradient(135deg,var(--amber),var(--ember));
+  box-shadow:0 0 10px rgba(255,178,94,.65)}
+
+/* 今日天气 */
+.today-temp{display:flex;align-items:center;gap:18px;margin:6px 0 10px}
+.temp-num{font-family:var(--mono);font-size:84px;line-height:1;font-weight:700;
+  font-variant-numeric:tabular-nums}
+.temp-num .u{font-size:30px;color:var(--amber);vertical-align:super}
+.emoji-big{font-size:56px;filter:drop-shadow(0 8px 20px rgba(255,178,94,.35));
+  animation:float 5s ease-in-out infinite}
+@keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.today-desc{font-size:19px;letter-spacing:.14em;color:var(--tx);margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 6px}
+.chip{font-family:var(--mono);font-size:11px;color:var(--dim);letter-spacing:.04em;
+  background:rgba(255,255,255,.04);border:1px solid var(--card-brd);
+  padding:5px 11px;border-radius:99px}
+.chip b{color:var(--tx);font-weight:600}
+.aqi{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;margin-top:6px}
+.official{font-family:var(--mono);font-size:11px;color:var(--amber);letter-spacing:.04em;
+  margin-top:10px;padding:8px 12px;border:1px dashed rgba(255,178,94,.32);border-radius:12px;
+  background:rgba(255,178,94,.06);line-height:1.9}
+.official b{color:var(--gold)}
+.official .of-tag{color:var(--faint);margin-right:6px}
+.aqi .badge{font-family:var(--mono);font-weight:700;padding:3px 10px;border-radius:99px;
+  border:1px solid currentColor}
+.sunline{display:flex;gap:22px;margin-top:12px;padding-top:12px;
+  border-top:1px dashed rgba(150,190,230,.16);font-family:var(--mono);font-size:12px;
+  color:var(--dim);letter-spacing:.06em}
+.sunline b{color:var(--gold);font-weight:600}
+
+/* 晚霞环形仪表 */
+.hero-sunset{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.ring-wrap{position:relative;width:190px;height:190px;margin:8px 0 2px}
+.ring-wrap svg{width:100%;height:100%;transform:rotate(-90deg)}
+.ring-track{stroke:rgba(255,255,255,.07)}
+.ring-arc{transition:stroke-dashoffset 1.8s cubic-bezier(.3,.7,.2,1);filter:drop-shadow(0 0 12px rgba(255,122,89,.5))}
+.ring-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.ring-val{font-family:var(--mono);font-size:44px;font-weight:700}
+.ring-pct{font-family:var(--mono);font-size:13px;color:var(--dim)}
+.s-level{font-size:13px;letter-spacing:.34em;margin-top:4px}
+.s-meta{font-family:var(--mono);font-size:12px;color:var(--dim);margin-top:8px;letter-spacing:.06em}
+.s-meta b{color:var(--tx)}
+.s-tip{font-size:11.5px;line-height:1.8;color:var(--faint);margin-top:10px;max-width:270px}
+
+/* 晚霞地图 */
+.map-canvas{width:100%;height:auto;margin-top:4px}
+.sunmap-dir{display:flex;justify-content:space-between;margin-top:8px;font-family:var(--mono);
+  font-size:12px;color:var(--dim)}
+.sunmap-dir .s{color:var(--ice)} .sunmap-dir .w{color:var(--amber)}
+.sunmap-dir b{font-size:15px;letter-spacing:.04em}
+.map-tip{font-size:11.5px;color:var(--faint);line-height:1.7;margin-top:8px}
+
+/* 趋势图 */
+.trend{min-height:190px}
+.axis{font-family:var(--mono);font-size:9.5px;fill:var(--faint)}
+.trend .legend{display:flex;gap:14px;font-size:10.5px;color:var(--faint);margin-top:8px;font-family:var(--mono)}
+.dot-legend{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+/* 3 天预报 */
+.fday{padding:18px 20px;cursor:default}
+.fday:hover{background:rgba(255,255,255,.03)}
+.fday .d{font-size:12px;letter-spacing:.3em;color:var(--dim);margin-bottom:8px}
+.fday .e{font-size:34px;margin:2px 0 8px}
+.fday .t{font-family:var(--mono);font-size:24px;font-variant-numeric:tabular-nums}
+.fday .t small{color:var(--dim);font-size:13px;margin-left:6px}
+.fday .w{font-size:13px;color:var(--tx);letter-spacing:.08em;margin-top:4px}
+.fday .p{margin-top:10px}
+.fday .p .bar{height:5px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.fday .p .bar i{display:block;height:100%;width:0;border-radius:99px;
+  background:linear-gradient(90deg,var(--ice),var(--violet));transition:width 1.2s ease}
+.fday .p span{font-family:var(--mono);font-size:10.5px;color:var(--faint);letter-spacing:.08em}
+
+/* 空气质量 */
+.aq-wrap{display:flex;align-items:center;gap:22px}
+.aq-ring{position:relative;width:120px;height:120px;flex:0 0 auto}
+.aq-ring svg{transform:rotate(-90deg)}
+.aq-ring .aq-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px}
+.aq-ring .aq-num{font-family:var(--mono);font-size:30px;font-weight:700;line-height:1}
+.aq-ring .aq-name{font-size:9.5px;letter-spacing:.3em;color:var(--faint);font-family:var(--mono)}
+.aq-info .aq-val{font-family:var(--mono);font-size:40px;font-weight:700;line-height:1}
+.aq-info .aq-lv{font-size:14px;letter-spacing:.2em;margin-top:4px}
+.aq-info .aq-pm{font-family:var(--mono);font-size:11.5px;color:var(--dim);margin-top:10px;line-height:1.9}
+.aq-legend{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.aq-legend span{font-size:10px;font-family:var(--mono);padding:3px 8px;border-radius:99px;
+  border:1px solid var(--card-brd);color:var(--faint)}
+
+/* 预警 */
+.warn{display:flex;gap:14px;align-items:flex-start;border-radius:14px;padding:12px 16px;margin-bottom:10px;
+  background:linear-gradient(90deg,rgba(255,93,115,.13),rgba(255,93,115,.02));
+  border:1px solid rgba(255,93,115,.35);animation:rise .5s both;transition:transform .2s ease,border-color .2s ease}
+.warn.clickable{cursor:pointer}
+.warn.clickable:hover{border-color:rgba(255,178,94,.55);transform:translateX(5px)}
+.warn .lv{flex:0 0 auto;font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:99px;
+  border:1px solid currentColor}
+.warn .tx b{display:block;font-size:13.5px;margin-bottom:3px}
+.warn .tx p{font-size:11.5px;color:var(--dim);line-height:1.6}
+.warn .w-src{display:inline-block;margin-top:4px;font-family:var(--mono);font-size:9.5px;
+  color:var(--faint);border:1px dashed var(--card-brd);border-radius:99px;padding:1px 8px}
+#warnList{max-height:320px;overflow-y:auto;padding-right:6px;scrollbar-width:thin;
+  scrollbar-color:rgba(127,212,255,.25) transparent}
+#warnList::-webkit-scrollbar{width:5px}
+#warnList::-webkit-scrollbar-thumb{background:rgba(127,212,255,.25);border-radius:99px}
+.empty{font-family:var(--mono);font-size:12px;color:var(--good);letter-spacing:.08em;
+  border:1px dashed var(--card-brd);border-radius:14px;padding:14px 16px}
+
+/* 推荐 */
+.rec{display:flex;align-items:flex-start;gap:12px;border-radius:14px;padding:12px 14px;
+  border:1px solid var(--card-brd);background:rgba(255,255,255,.02);margin-bottom:8px;
+  transition:all .22s ease;animation:rise .5s both}
+.rec:hover{border-color:rgba(255,178,94,.4);transform:translateX(4px)}
+.rec .ic{font-size:24px}
+.rec .nm{font-size:13.5px;font-weight:700;letter-spacing:.06em}
+.rec .lv{font-size:10.5px;letter-spacing:.14em;color:var(--amber);margin:2px 0 4px}
+.rec .sm{font-size:11px;color:var(--faint);line-height:1.6}
+.rec .score{margin-left:auto;font-family:var(--mono);font-size:13px;color:var(--gold);flex:0 0 auto}
+
+
+
+/* 设置弹窗 */
+.modal-mask{position:fixed;inset:0;z-index:70;display:none;align-items:center;justify-content:center;
+  background:rgba(5,10,22,.72);backdrop-filter:blur(6px)}
+.modal-mask.show{display:flex}
+.modal{width:min(460px,92vw);background:rgba(11,24,48,.96);border:1px solid var(--card-brd);
+  border-radius:20px;padding:24px 26px;box-shadow:0 30px 80px rgba(0,0,0,.55)}
+.modal-title{font-family:var(--serif);font-size:19px;letter-spacing:.2em;color:var(--gold);
+  margin-bottom:18px;padding-bottom:12px;border-bottom:1px solid var(--card-brd)}
+.set-row{display:flex;align-items:center;justify-content:space-between;gap:14px;
+  padding:12px 0;border-bottom:1px dashed rgba(150,190,230,.12)}
+.set-label{font-size:13px;color:var(--tx);line-height:1.5}
+.set-label small{display:block;font-size:10.5px;color:var(--faint);margin-top:2px}
+.set-row select{font-family:var(--sans);font-size:12px;color:var(--tx);background:var(--card);
+  border:1px solid var(--card-brd);border-radius:10px;padding:8px 10px;outline:none;max-width:230px}
+.set-row select option{background:#0d1c30}
+.set-check{width:20px;height:20px;accent-color:var(--amber);cursor:pointer;flex:0 0 auto}
+.modal-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}
+
+/* 加载态 */
+.loading{position:fixed;inset:0;z-index:50;display:flex;flex-direction:column;gap:18px;
+  align-items:center;justify-content:center;background:rgba(5,10,22,.88);backdrop-filter:blur(6px);
+  transition:opacity .5s ease}
+.loading.hide{opacity:0;pointer-events:none}
+.loading .orb{width:64px;height:64px;border-radius:50%;
+  background:radial-gradient(circle at 35% 30%, #fff6e0, var(--amber) 60%, var(--ember));
+  box-shadow:0 0 60px rgba(255,178,94,.5);animation:breathe 2s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.15)}}
+.loading .txt{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.4em}
+.toast{position:fixed;left:50%;bottom:64px;transform:translate(-50%,16px);z-index:60;
+  background:#0d1c30;border:1px solid var(--card-brd);color:var(--tx);
+  font-size:12px;letter-spacing:.04em;padding:11px 22px;border-radius:99px;
+  opacity:0;transition:all .35s cubic-bezier(.2,.8,.2,1);box-shadow:0 14px 40px rgba(0,0,0,.5);
+  font-family:var(--mono)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+/* 赏月指南 */
+.moon{display:flex;gap:16px;align-items:center}
+.moon .phase{font-size:46px;flex:0 0 auto;filter:drop-shadow(0 0 14px rgba(139,124,246,.45))}
+.moon-info{flex:1;min-width:0}
+.moon-info .p{font-size:13px;font-weight:700;letter-spacing:.05em;color:var(--gold);line-height:1.6}
+.moon-info .meta{font-family:var(--mono);font-size:11.5px;color:var(--dim);margin-top:6px;letter-spacing:.04em;line-height:1.8}
+.moon-info .meta b{color:var(--tx)}
+.moon-info .tip{font-size:11px;color:var(--faint);line-height:1.7;margin-top:8px}
+.mbar{height:6px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden;margin-top:8px}
+.mbar i{display:block;height:100%;border-radius:99px;
+  background:linear-gradient(90deg,var(--violet),var(--gold));transition:width 1.2s ease}
+
+/* 生活指数 */
+.life{display:flex;flex-wrap:wrap;gap:8px}
+.life .it{flex:1 1 45%;min-width:150px;border:1px solid var(--card-brd);border-radius:12px;
+  padding:10px 12px;background:rgba(255,255,255,.02);animation:rise .5s both}
+.life .it b{font-size:12.5px;letter-spacing:.05em}
+.life .it .lv{font-size:11px;color:var(--amber);margin:3px 0 3px;letter-spacing:.1em}
+.life .it span{font-size:10.5px;color:var(--faint);line-height:1.65;display:block}
+
+/* 天气新闻播报 */
+.news-text{font-size:12.5px;line-height:2.05;color:var(--dim);white-space:pre-wrap;
+  max-height:270px;overflow-y:auto;padding-right:8px}
+.news-actions{display:flex;gap:10px;margin-top:14px}
+.rec .day{font-size:10px;font-family:var(--mono);color:var(--ice);
+  border:1px solid rgba(127,212,255,.35);border-radius:99px;padding:1px 8px;
+  margin-left:7px;vertical-align:1.5px}
+
+.g-glow{grid-template-columns:1fr}
+.glow-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+.glow-hint{font-size:11px;color:var(--faint);font-family:var(--mono);letter-spacing:.08em}
+#glowMap{display:block;border-radius:14px;background:rgba(5,12,26,.45);border:1px solid var(--card-brd);
+  transition:box-shadow .3s ease}
+#glowMap:hover{box-shadow:0 0 28px rgba(127,212,255,.08)}
+.glow-detail{font-size:12px;color:var(--dim);line-height:1.7;margin-top:10px;min-height:18px}
+.glow-detail b{color:var(--tx)}
+.glow-legend{display:flex;gap:14px;flex-wrap:wrap;margin-top:10px;font-family:var(--mono);font-size:10px;color:var(--faint)}
+.glow-legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.glow-legend .gdot{cursor:pointer;padding:2px 6px;border-radius:8px;transition:all .15s}
+.glow-legend .gdot.on{background:rgba(255,178,94,.16);color:var(--gold)}
+.g-moon{grid-template-columns:1fr 1fr}
+.g-news{grid-template-columns:1fr}
+.g-rec{grid-template-columns:1fr}
+@media (max-width:940px){ .g-hero,.g-map,.g-fc,.g-low,.g-rec,.g-moon,.g-news{grid-template-columns:1fr} }
+</style>
+</head>
+<body>
+<div class="sky"></div><div class="grain"></div><div class="stars"></div>
+
+<div class="loading" id="loading">
+  <div class="orb"></div>
+  <div class="txt">正在观测天空…</div>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="wrap">
+  <header class="masthead">
+    <div class="brand">晴屿<small>SLICE OF SKY · 天空切片</small></div>
+    <div class="mast-right">
+      <div class="city" id="city">—</div>
+      <div class="city-sub" id="citySub"></div>
+      <div class="clock"><span id="clock">--:--</span> &nbsp;<span id="date">----年--月--日</span></div>
+    </div>
+  </header>
+
+  <div class="toolbar">
+    <button class="tbtn primary" id="btnLocate">◎ 定位当前位置</button>
+    <div class="search"><input id="cityInput" placeholder="搜索城市…"><button id="btnSearch">→</button></div>
+    <select class="city-select" id="citySelect" title="全国城市选择"><option value="">全国城市 ▾</option></select>
+    <button class="tbtn" id="btnUnit">°F</button>
+    <button class="tbtn" id="btnRefresh">⟳ 刷新</button>
+    <button class="tbtn" id="btnSettings">⚙ 设置</button>
+    <div class="hist" id="hist"></div>
+    <div class="spacer"></div>
+    <div class="status" id="status">准备中…</div>
+  </div>
+
+  <div class="grid g-hero">
+    <div class="card" style="animation-delay:.04s">
+      <div class="sec-tag">TODAY · 今日</div>
+      <div class="today-temp"><span class="temp-num" id="temp">--<span class="u">°</span></span>
+        <span class="emoji-big" id="emoji">🌡</span></div>
+      <div class="today-desc" id="desc">—</div>
+      <div class="chips" id="chips"></div>
+      <div class="aqi" id="aqi"></div>
+      <div class="official" id="official"></div>
+      <div class="sunline" id="sunline"></div>
+    </div>
+    <div class="card hero-sunset" style="animation-delay:.1s">
+      <div class="sec-tag">SUNSET · 晚霞概率</div>
+      <div class="ring-wrap">
+        <svg viewBox="0 0 200 200">
+          <circle class="ring-track" cx="100" cy="100" r="86" fill="none" stroke-width="12"/>
+          <circle class="ring-arc" id="ringArc" cx="100" cy="100" r="86" fill="none" stroke-width="12"
+            stroke-linecap="round" stroke="var(--ember)" stroke-dasharray="540.4"
+            stroke-dashoffset="540.4"/>
+        </svg>
+        <div class="ring-center"><div class="ring-val" id="ringVal">0</div><div class="ring-pct">%</div></div>
+      </div>
+      <div class="s-level" id="sLevel">—</div>
+      <div class="s-meta" id="sMeta">—</div>
+      <div class="s-tip" id="sTip"></div>
+    </div>
+  </div>
+
+  <div class="grid g-map">
+    <div class="card" style="animation-delay:.16s">
+      <div class="sec-tag">SUN PATH · 晚霞地图</div>
+      <svg class="map-canvas" id="sunMap" viewBox="0 0 520 280"></svg>
+      <div class="sunmap-dir"><span class="s" id="dirSunrise">日出 —</span><span class="w" id="dirSunset">日落 —</span></div>
+      <div class="map-tip" id="mapTip"></div>
+    </div>
+    <div class="card trend" style="animation-delay:.22s">
+      <div class="sec-tag">TREND · 未来 12 小时</div>
+      <svg id="trendSvg" viewBox="0 0 560 160" width="100%"></svg>
+      <div class="legend" id="trendLegend"></div>
+    </div>
+  </div>
+
+  <div class="grid g-fc">
+    <div class="card fday" id="f1" style="animation-delay:.28s"></div>
+    <div class="card fday" id="f2" style="animation-delay:.34s"></div>
+    <div class="card fday" id="f3" style="animation-delay:.4s"></div>
+  </div>
+
+  <div class="grid g-low">
+    <div class="card" style="animation-delay:.46s">
+      <div class="sec-tag">AIR · 空气质量</div>
+      <div class="aq-wrap"><div class="aq-ring" id="aqRing"></div><div class="aq-info" id="aqInfo"></div></div>
+      <div class="aq-legend" id="aqLegend"></div>
+    </div>
+    <div class="card" style="animation-delay:.52s">
+      <div class="sec-tag">WARN · 预警与提醒</div>
+      <div id="warnList"></div>
+    </div>
+  </div>
+
+  <div class="grid g-glow">
+    <div class="card" style="animation-delay:.5s">
+      <div class="sec-tag">GLOW MAP · 霞光地图</div>
+      <div class="glow-toolbar">
+        <button class="tbtn active" id="glowMetricSunset">🌇 晚霞</button>
+        <button class="tbtn" id="glowMetricSunrise">🌅 朝霞</button>
+        <div class="spacer"></div>
+        <div class="glow-hint" id="glowHint">全国 37 城 · 圆点颜色 = 霞光指数</div>
+      </div>
+      <svg id="glowMap" viewBox="0 0 560 516" width="100%"></svg>
+      <div class="glow-detail" id="glowDetail">将鼠标移到城市圆点上，查看该城朝霞 / 晚霞详情。</div>
+      <div class="glow-legend" id="glowLegend"></div>
+    </div>
+  </div>
+
+  <div class="grid g-moon">
+    <div class="card" style="animation-delay:.58s">
+      <div class="sec-tag">MOON · 赏月指南</div>
+      <div class="moon" id="moonBox">
+        <div class="phase" id="moonPhase">🌙</div>
+        <div class="moon-info">
+          <div class="p" id="moonTitle">—</div>
+          <div class="mbar"><i id="moonBar" style="width:0%"></i></div>
+          <div class="meta" id="moonMeta"></div>
+          <div class="tip" id="moonTip"></div>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="animation-delay:.64s">
+      <div class="sec-tag">LIFE · 生活指数</div>
+      <div class="life" id="lifeList"></div>
+    </div>
+  </div>
+
+  <div class="grid g-news">
+    <div class="card" style="animation-delay:.7s">
+      <div class="sec-tag">NEWS · 天气新闻播报</div>
+      <div class="news-text" id="newsText"></div>
+      <div class="news-actions">
+        <button class="tbtn pbtn" id="btnSpeak">🔊 播放播报</button>
+        <button class="tbtn pbtn" id="btnStop">⏹ 停止</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid g-rec">
+    <div class="card" style="animation-delay:.58s">
+      <div class="sec-tag">PICKS · 观赏推荐</div>
+      <div id="recList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 设置弹窗 -->
+<div class="modal-mask" id="settingsModal">
+  <div class="modal">
+    <div class="modal-title">⚙ 设置 · 数据源</div>
+    <div class="set-row">
+      <div class="set-label">预报模型<small>Open-Meteo 多模型选择</small></div>
+      <select id="setModel">
+        <option value="">默认（Open-Meteo 最佳混合）</option>
+        <option value="cma_grapes_global">中国气象局 CMA-GRAPES（更贴近官方预报）</option>
+      </select>
+    </div>
+    <div class="set-row">
+      <div class="set-label">官方天气<small>中国天气网实况 + 今日预报</small></div>
+      <input type="checkbox" id="setOfficial" class="set-check">
+    </div>
+    <div class="set-row">
+      <div class="set-label">中央气象台在线预警</div>
+      <input type="checkbox" id="setNmc" class="set-check">
+    </div>
+    <div class="set-row">
+      <div class="set-label">台风路径预警<small>按真实台风路径判定</small></div>
+      <input type="checkbox" id="setTyphoon" class="set-check">
+    </div>
+    <div class="modal-actions">
+      <button class="tbtn" id="settingsCancel">取消</button>
+      <button class="tbtn primary" id="settingsSave">保存并刷新</button>
+    </div>
+  </div>
+</div>
+
+<script src="china_map.js"></script>
+<script src="china_cities.js"></script>
+<script>
+/* ================= 桥接 ================= */
+let api = null;   // pywebview 桥就绪后注入
+let lastData = null;        // 最近一次渲染的数据，供霞光地图切换指标
+let glowMetric = "sunset";  // 霞光地图当前指标：sunset=晚霞 / sunrise=朝霞
+let runtimeSettings = {};   // 运行时设置（数据源开关）
+const $ = id => document.getElementById(id);
+
+/* ================= 渲染 ================= */
+const RING_C = 540.4;
+const AQ_COLOR = {"优":"#6fe3b0","良":"#7fd4ff","轻度污染":"#ffb25e","中度污染":"#ff8a3d","重度污染":"#ff5d73","严重污染":"#ff4d5e"};
+
+function render(d){
+  if(d.settings) runtimeSettings = d.settings;
+  $("city").textContent = d.location;
+  const _prov = d.province||"", _city2 = d.city2||"";
+  let sub = "";
+  if(_prov) sub += _prov;
+  if(_city2 && _city2 !== _prov) sub += (sub? " · " : "") + _city2;
+  if(d.lat!=null) sub += (sub? " · " : "") + `${d.lat.toFixed(4)}°N, ${d.lon.toFixed(4)}°E`;
+  $("citySub").textContent = sub || "";
+  // 今日
+  const t = d.today;
+  $("temp").innerHTML = `${Math.round(t.temp_max)}<span class="u">°</span>`;
+  $("emoji").textContent = t.emoji;
+  $("desc").textContent = `${t.desc} · 最低 ${Math.round(t.temp_min)}°`;
+  const chips = [
+    ["湿度", t.humidity!=null?Math.round(t.humidity)+"%":"--"],
+    ["风向", t.wind_direction!=null?t.wind_direction:"--"],
+    ["风速", t.wind_speed!=null?t.wind_speed.toFixed(1)+" m/s":"--"],
+    ["体感", t.feels_like!=null?Math.round(t.feels_like)+"°":"--"],
+    ["降水", t.precip_probability!=null?Math.round(t.precip_probability)+"%":"--"],
+    ["UV", t.uv!=null?t.uv.toFixed(1):"--"]
+  ];
+  $("chips").innerHTML = chips.map(c=>`<span class="chip">${c[0]} <b>${c[1]}</b></span>`).join("");
+  if (t.aqi){
+    const c = AQ_COLOR[t.aqi.level] || "#8fa6c0";
+    $("aqi").innerHTML = `<span class="badge" style="color:${c}">${t.aqi.level}</span>
+      <span>空气质量 ${Math.round(t.aqi.value)}${t.aqi.pm25!=null?` · PM2.5 ${t.aqi.pm25}`:""}${t.aqi.pm10!=null?` · PM10 ${t.aqi.pm10}`:""}</span>`;
+  } else $("aqi").innerHTML = "";
+  // 官方天气（中国天气网实况 + 今日预报）
+  const off = (runtimeSettings.show_official === false) ? null : (d.official||null);
+  let offHtml = "";
+  if (off && (off.current || off.today)){
+    const cur = off.current||{}, tdy = off.today||{};
+    let s = "";
+    if (cur.temp != null){
+      s += `<span class="of-tag">官方实况</span><b>${cur.temp}°C</b>`;
+      if (cur.wind_dir) s += ` · ${cur.wind_dir}${cur.wind_level?` ${cur.wind_level}`:""}`;
+      if (cur.humidity != null) s += ` · 湿度 ${cur.humidity}%`;
+    }
+    if (tdy.weather){
+      s += (s? "<br>":"") + `<span class="of-tag">官方预报</span>${tdy.weather}`;
+      const _tn = String(tdy.tempn||"").replace(/[℃°CF]/g,"").trim();
+      const _tx = String(tdy.temp||"").replace(/[℃°CF]/g,"").trim();
+      if (_tn && _tx) s += ` <b>${_tn}~${_tx}℃</b>`;
+    }
+    offHtml = s ? `<div class="official">${s}</div>` : "";
+  }
+  $("official").innerHTML = offHtml;
+  $("sunline").innerHTML = `<span>日出 <b>${t.sunrise}</b></span><span>日落 <b>${t.sunset}</b></span>
+    <span>更新 ${d.generated_at}</span>`;
+  // 晚霞环
+  const p = d.sunset.probability||0;
+  const color = p>=75?"var(--ember)":p>=50?"var(--amber)":"#5b7c9c";
+  const arc = $("ringArc"); arc.style.stroke = color;
+  requestAnimationFrame(()=>{ arc.style.strokeDashoffset = RING_C*(1-p/100); });
+  $("ringVal").textContent = Math.round(p);
+  $("sLevel").textContent = `${d.sunset.level}概率`;
+  $("sLevel").style.color = color;
+  $("sMeta").innerHTML = `日落 <b>${d.sunset.sunset_time}</b> · 云量 <b>${d.sunset.cloud_cover!=null?Math.round(d.sunset.cloud_cover)+"%":"--"}</b>`;
+  $("sTip").textContent = d.sunset.tips||"";
+  // 3 天
+  const names=["今天","明天","后天"];
+  d.daily.forEach((day,i)=>{
+    const el = $("f"+(i+1));
+    if(!el) return;
+    el.innerHTML = `<div class="d">${names[i]||day.date}</div><div class="e">${day.emoji}</div>
+      <div class="t">${Math.round(day.tmax)}°<small>/${Math.round(day.tmin)}°</small></div>
+      <div class="w">${day.desc}</div>
+      <div class="p"><div class="bar"><i style="width:${day.pop!=null?day.pop:0}%"></i></div>
+      <span>降水 ${day.pop!=null?Math.round(day.pop)+"%":"--"}</span></div>`;
+  });
+  drawSunMap(d); drawTrend(d); renderAir(d);
+  lastData = d; drawGlowMap(d, glowMetric);
+  // 预警
+  const srcMap = {"rules":"规则引擎","typhoon":"台风路径","nmc":"中央气象台","qweather":"和风天气"};
+  const escUrl = u => (u||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;");
+  $("warnList").innerHTML = d.warnings.length ? d.warnings.map((w,i)=>{
+    const c = {"红色":"#ff4d5e","橙色":"#ff8a3d","黄色":"#ffd166","蓝色":"#7fd4ff"}[w.level]||"#7fd4ff";
+    const clickable = w.url ? " clickable" : "";
+    const hint = w.url ? ` · <b style="color:var(--ice)">↗ 点击查看详情</b>` : "";
+    return `<div class="warn${clickable}" data-url="${escUrl(w.url)}" style="animation-delay:${i*.07}s">
+      <span class="lv" style="color:${c}">${w.level}</span>
+      <div class="tx"><b style="color:${c}">${w.title}</b><p>${w.desc||""}</p>
+      ${w.source?`<span class="w-src">来源：${srcMap[w.source]||w.source}${w.issued_at?` · ${w.issued_at}`:""}${hint}</span>`:""}</div></div>`;
+  }).join("") : `<div class="empty">✓ 当前无特殊天气与预警，天空平静。</div>`;
+  // 推荐
+  $("recList").innerHTML = d.recommendations.map((r,i)=>
+    `<div class="rec" style="animation-delay:${i*.06}s"><span class="ic">${r.icon}</span>
+     <div><div class="nm">${r.name}${r.day_label?`<span class="day">${r.day_label}</span>`:""}</div><div class="lv">${r.level}</div>
+     <div class="sm">${r.summary||""}</div></div><span class="score">${r.score}</span></div>`).join("");
+  // 赏月 / 生活指数 / 天气新闻 / 带伞提醒
+  renderMoon(d.moon);
+  renderLife(d.life||[]);
+  $("newsText").textContent = d.news||"";
+  if(d.rain_at){ $("sunline").innerHTML += `<span style="color:var(--ice)">带伞 <b>${d.rain_at}</b></span>`; }
+  // 历史 + 任务
+  renderHist(d.history||[]);
+  $("status").textContent = "已更新 · " + (d.unit==="f"?"°F":"°C");
+}
+
+function renderMoon(m){
+  if(!m){ $("moonBox").innerHTML = `<div class="empty">赏月数据暂不可用</div>`; return; }
+  const emojis={"新月":"🌑","娥眉月":"🌒","上弦月":"🌓","盈凸月":"🌔","满月":"🌕","亏凸月":"🌖","下弦月":"🌗","残月":"🌘"};
+  $("moonPhase").textContent = emojis[m.phase]||"🌙";
+  $("moonTitle").textContent = `月相「${m.phase}」· 照明度 ${Math.round(m.illuminated)}% · 赏月指数 ${Math.round(m.score)}%（${m.level}）`;
+  $("moonBar").style.width = `${Math.max(0,Math.min(100,m.score))}%`;
+  const meta = [];
+  if(m.best_time) meta.push(`最佳时段 <b>${m.best_time}</b>`);
+  if(m.moonrise) meta.push(`约估月出 <b>${m.moonrise}</b>`);
+  if(m.cloud_cover!=null) meta.push(`夜间云量 <b>${Math.round(m.cloud_cover)}%</b>`);
+  $("moonMeta").innerHTML = meta.join(" · ")||"—";
+  $("moonTip").textContent = m.tips||m.reason||"";
+}
+function renderLife(list){
+  $("lifeList").innerHTML = list.length? list.map(x=>
+    `<div class="it"><b>${x.icon} ${x.name}</b><div class="lv">${x.level}</div><span>${x.advice}</span></div>`).join("")
+    : `<div class="empty">生活指数暂不可用</div>`;
+}
+function renderHist(list){
+  $("hist").innerHTML = list.map(c=>`<span class="tag" data-city="${c}">◉ ${c}</span>`).join("");
+  document.querySelectorAll(".hist .tag").forEach(el=>{
+    el.onclick = ()=> doSearch(el.dataset.city);
+  });
+}
+
+
+/* ================= 晚霞地图 SVG ================= */
+function drawSunMap(d){
+  const m = d.sunmap||{};
+  const svg = $("sunMap"); svg.innerHTML="";
+  const W=520,H=280,cx=W/2,cy=232,R=150;
+  const NS="http://www.w3.org/2000/svg";
+  const el=(tag,attr)=>{const e=document.createElementNS(NS,tag);for(const k in attr){if(k==="innerHTML")e.innerHTML=attr[k];else e.setAttribute(k,attr[k]);}return e;};
+  // 地平线
+  svg.appendChild(el("line",{x1:30,y1:cy,x2:W-30,y2:cy,stroke:"rgba(150,190,230,.25)",strokeWidth:2}));
+  // 天穹
+  svg.appendChild(el("path",{d:`M ${cx-R} ${cy} A ${R} ${R} 0 0 1 ${cx+R} ${cy}`,fill:"none",
+    stroke:"rgba(150,190,230,.2)",strokeWidth:2}));
+  // 方位刻度
+  const dirs={0:"北",90:"东",180:"南",270:"西"};
+  for(const [deg,label] of Object.entries(dirs)){
+    const rad=(deg-90)*Math.PI/180;
+    const x1=cx+R*.88*Math.cos(rad), y1=cy+R*.88*Math.sin(rad);
+    const x2=cx+R*1.06*Math.cos(rad), y2=cy+R*1.06*Math.sin(rad);
+    svg.appendChild(el("line",{x1:x1,y1:y1,x2:x2,y2:y2,stroke:"rgba(150,190,230,.35)",strokeWidth:1.5}));
+    svg.appendChild(el("text",{x:cx+R*1.18*Math.cos(rad),y:cy+R*1.18*Math.sin(rad)+4,
+      fill:"#5c7591","font-size":12,"text-anchor":"middle","font-family":"monospace",innerHTML:label}));
+  }
+  const azS=m.az_sunrise, azE=m.az_sunset;
+  // 太阳轨迹弧（虚线，动画）
+  const aS=(270-azS+360)%360, aE=(270-azE+360)%360;
+  const ext=((aE-aS)%360+360)%360;
+  const arcPath=(start,extent)=>`M ${cx-R} ${cy} A ${R} ${R} 0 ${extent>180?1:0} 1 ${cx+R} ${cy}`;
+  const segs=ext<=180?[[aS,ext]]:[[aS,180],[(aS+180)%360,ext-180]];
+  let dd="";
+  segs.forEach(([s,e])=>{
+    const p1=pt(s),p2=pt(s+e);
+    const large=e>180?1:0;
+    dd+=`M ${p1.x} ${p1.y} A ${R} ${R} 0 ${large} 1 ${p2.x} ${p2.y} `;
+  });
+  const traj=el("path",{d:dd,fill:"none",stroke:"url(#arcGrad)",strokeWidth:3,
+    "stroke-dasharray":"10 7","stroke-linecap":"round",opacity:0});
+  const grad=el("linearGradient",{id:"arcGrad",x1:"0%",y1:"0%",x2:"100%",y2:"0%"});
+  grad.innerHTML=`<stop offset="0%" stop-color="#7fd4ff"/><stop offset="50%" stop-color="#ffffff"/><stop offset="100%" stop-color="#ffb25e"/>`;
+  svg.appendChild(grad); svg.appendChild(traj);
+  requestAnimationFrame(()=>{traj.style.transition="opacity 1.5s ease";traj.style.opacity=1;});
+  // 日出点
+  const pR=pt(aS);
+  svg.appendChild(el("circle",{cx:pR.x,cy:pR.y,r:14,fill:"none",stroke:"#7fd4ff",strokeWidth:2}));
+  svg.appendChild(el("circle",{cx:pR.x,cy:pR.y,r:5,fill:"#7fd4ff"}));
+  svg.appendChild(el("text",{x:pR.x,y:pR.y-22,"text-anchor":"middle",fill:"#7fd4ff",
+    "font-size":12,"font-family":"Microsoft YaHei UI",innerHTML:"日出"}));
+  // 日落点（带光晕）
+  const pW=pt(aE);
+  const glow=el("circle",{cx:pW.x,cy:pW.y,r:34,fill:"rgba(255,178,94,.18)"});
+  svg.appendChild(glow);
+  svg.appendChild(el("circle",{cx:pW.x,cy:pW.y,r:18,fill:"#ffb25e"}));
+  svg.appendChild(el("circle",{cx:pW.x,cy:pW.y,r:8,fill:"#fff3d6"}));
+  svg.appendChild(el("text",{x:pW.x,y:pW.y-26,"text-anchor":"middle",fill:"#ffb25e",
+    "font-size":12,"font-family":"Microsoft YaHei UI",innerHTML:"日落"}));
+  // 概率光晕（强度随概率）
+  const glow2=el("circle",{cx:pW.x,cy:pW.y,r:30+(d.sunset.probability||0)*0.25,
+    fill:"none",stroke:"rgba(255,178,94,.35)",strokeWidth:2});
+  glow2.style.animation="breathe 3s ease-in-out infinite";
+  svg.appendChild(glow2);
+  function pt(a){const rad=a*Math.PI/180;return{x:cx+R*.8*Math.cos(rad),y:cy+R*.8*Math.sin(rad)};}
+  $("dirSunrise").innerHTML=`日出 <b>${m.dir_sunrise} ${Math.round(m.az_sunrise)}°</b>`;
+  $("dirSunset").innerHTML=`日落 <b>${m.dir_sunset} ${Math.round(m.az_sunset)}°</b>`;
+  $("mapTip").textContent=`日落方向「${m.dir_sunset}」：面向${m.dir_sunset}视野开阔处观赏最佳，高楼层或江边更佳。`;
+}
+
+/* ================= 空气质量 ================= */
+function renderAir(d){
+  const aq = d.today && d.today.aqi;
+  const ring = $("aqRing"), info = $("aqInfo"), legend = $("aqLegend");
+  legend.innerHTML = Object.entries(AQ_COLOR).map(([k,cl])=>
+    `<span style="color:${cl};border-color:${cl}66">${k}</span>`).join("");
+  if(!aq){
+    ring.innerHTML = "";
+    info.innerHTML = `<div class="aq-val" style="color:var(--faint)">--</div>
+      <div class="aq-lv" style="color:var(--faint)">空气质量数据暂不可用</div>
+      <div class="aq-pm">可稍后点击「⟳ 刷新」重试</div>`;
+    return;
+  }
+  const v = aq.value, c = AQ_COLOR[aq.level] || "#8fa6c0";
+  const C = 2*Math.PI*52;
+  ring.innerHTML = `<svg viewBox="0 0 120 120">
+      <circle cx="60" cy="60" r="52" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="11"/>
+      <circle class="aq-arc" cx="60" cy="60" r="52" fill="none" stroke="${c}" stroke-width="11"
+        stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${C}"/>
+    </svg><div class="aq-center"><div class="aq-num" style="color:${c}">${Math.round(v)}</div><div class="aq-name">AQI</div></div>`;
+  requestAnimationFrame(()=>{ const arc=ring.querySelector(".aq-arc"); if(arc) arc.style.strokeDashoffset = C*(1 - Math.min(1, v/500)); });
+  const pm = [];
+  if(aq.pm25!=null) pm.push(`PM2.5 <b>${aq.pm25}</b>`);
+  if(aq.pm10!=null) pm.push(`PM10 <b>${aq.pm10}</b>`);
+  if(aq.o3!=null) pm.push(`O₃ <b>${aq.o3}</b>`);
+  if(aq.no2!=null) pm.push(`NO₂ <b>${aq.no2}</b>`);
+  if(aq.so2!=null) pm.push(`SO₂ <b>${aq.so2}</b>`);
+  if(aq.co!=null) pm.push(`CO <b>${(aq.co/1000).toFixed(1)} mg</b>`);
+  info.innerHTML = `<div class="aq-val" style="color:${c}">${Math.round(v)}</div>
+    <div class="aq-lv" style="color:${c}">${aq.level}</div>
+    <div class="aq-pm">${pm.join(" · ")}<br><span style="color:var(--faint)">浓度单位 µg/m³（CO 为 mg/m³）</span></div>`;
+}
+
+/* ================= 趋势图 SVG ================= */
+function drawTrend(d){
+  const svg=$("trendSvg"); svg.innerHTML="";
+  const pts=d.trend||[]; if(pts.length<2)return;
+  const NS="http://www.w3.org/2000/svg";
+  const W=560,H=150,pl=36,pr=12,pt_=26,pb=24;
+  const el=(tag,attr)=>{const e=document.createElementNS(NS,tag);for(const k in attr){if(k==="innerHTML")e.innerHTML=attr[k];else e.setAttribute(k,attr[k]);}return e;};
+  const ts=pts.map(p=>p.t); const tmin=Math.min(...ts),tmax=Math.max(...ts),span=Math.max(tmax-tmin,1);
+  const X=i=>pl+i*(W-pl-pr)/(pts.length-1);
+  const Y=t=>pt_+(H-pt_-pb)*(1-(t-tmin)/span);
+  // 温感阈值：按体感常识的绝对温度分档（摄氏 / 华氏自适应）
+  // 较暖 >= 25°C（77°F）；较凉 < 12°C（约 54°F）；中间为舒适
+  const f = d.unit==="f";
+  const warmT = f ? 77 : 25;
+  const coolT = f ? 54 : 12;
+  const colorOf = t => t>=warmT ? "#ffb25e" : t<coolT ? "#7fd4ff" : "#b9c9dd";
+  const legend = $("trendLegend");
+  if(legend) legend.innerHTML =
+    `<span><i class="dot-legend" style="background:var(--amber)"></i>较暖 ≥${warmT}°${f?"F":"C"}</span>` +
+    `<span><i class="dot-legend" style="background:#b9c9dd"></i>舒适</span>` +
+    `<span><i class="dot-legend" style="background:var(--ice)"></i>较凉 &lt;${coolT}°${f?"F":"C"}</span>`;
+  // 网格 + Y 轴温度刻度
+  for(let g=0;g<5;g++){
+    const gy=pt_+(H-pt_-pb)*g/4;
+    svg.appendChild(el("line",{x1:pl,y1:gy,x2:W-pr,y2:gy,stroke:"rgba(150,190,230,.08)"}));
+    svg.appendChild(el("text",{x:pl-6,y:gy+3,"text-anchor":"end","font-size":9.5,fill:"#5c7591",
+      "font-family":"monospace",innerHTML:`${Math.round(tmax-span*g/4)}°`}));
+  }
+  // 渐变填充
+  const fillPts=pts.map((p,i)=>`${X(i)},${Y(p.t)}`).join(" ");
+  svg.appendChild(el("polygon",{points:`${pl},${H-pb} ${fillPts} ${W-pr},${H-pb}`,
+    fill:"url(#trendFill)",opacity:.35}));
+  const g2=el("linearGradient",{id:"trendFill",x1:"0",y1:"0",x2:"0",y2:"1"});
+  g2.innerHTML=`<stop offset="0%" stop-color="#ffb25e"/><stop offset="100%" stop-color="#12294a"/>`;
+  svg.appendChild(g2);
+  // 折线（按线段平均温度分色）
+  for(let i=0;i<pts.length-1;i++){
+    svg.appendChild(el("line",{x1:X(i),y1:Y(pts[i].t),x2:X(i+1),y2:Y(pts[i+1].t),
+      stroke:colorOf((pts[i].t+pts[i+1].t)/2),strokeWidth:2.5,
+      "stroke-linejoin":"round","stroke-linecap":"round"}));
+  }
+  // 点 + 温度标注 + 图标 + 时间
+  pts.forEach((p,i)=>{
+    const cx=X(i),cy=Y(p.t);
+    const c=colorOf(p.t);
+    svg.appendChild(el("circle",{cx:cx,cy:cy,r:4,fill:c}));
+    svg.appendChild(el("text",{x:cx,y:cy-24,"text-anchor":"middle","font-size":12,fill:"#eef4fb",
+      "font-family":"monospace","font-weight":700,innerHTML:`${Math.round(p.t)}°`}));
+    svg.appendChild(el("text",{x:cx,y:cy-8,"text-anchor":"middle","font-size":13,innerHTML:p.emoji}));
+    svg.appendChild(el("text",{x:cx,y:H-6,"text-anchor":"middle","font-size":9.5,fill:"#5c7591",
+      "font-family":"monospace",innerHTML:i===0?"现在":p.hour}));
+  });
+}
+
+/* ================= 霞光地图 ================= */
+const GLOW_PROJ = {minLon:73.5, maxLon:135.1, minLat:3.8, maxLat:53.6, w:560};
+function glowColor(v){
+  if(v==null) return "#3a516e";
+  if(v>=75) return "#ff4d6d";
+  if(v>=50) return "#ff9f43";
+  if(v>=30) return "#ffd166";
+  return "#5b7c9c";
+}
+function drawGlowMap(d, metric){
+  const svg = $("glowMap"), list = d.glow_map || [];
+  const map = window.CHINA_MAP || {};
+  const mid = (GLOW_PROJ.minLat+GLOW_PROJ.maxLat)/2*Math.PI/180;
+  const h = GLOW_PROJ.w * (GLOW_PROJ.maxLat-GLOW_PROJ.minLat) /
+            ((GLOW_PROJ.maxLon-GLOW_PROJ.minLon)*Math.cos(mid));
+  svg.setAttribute("viewBox", `0 0 ${GLOW_PROJ.w} ${h.toFixed(1)}`);
+  svg.innerHTML = "";
+  const NS = "http://www.w3.org/2000/svg";
+  const el = (tag,attr)=>{const e=document.createElementNS(NS,tag);for(const k in attr){if(k==="innerHTML")e.innerHTML=attr[k];else e.setAttribute(k,attr[k]);}return e;};
+  if(map.path){
+    svg.appendChild(el("path",{d:map.path, fill:"rgba(13,28,51,.92)", stroke:"rgba(127,212,255,.30)", "stroke-width":1}));
+  }
+  const X = lon => (lon-GLOW_PROJ.minLon)/(GLOW_PROJ.maxLon-GLOW_PROJ.minLon)*GLOW_PROJ.w;
+  const Y = lat => (GLOW_PROJ.maxLat-lat)/(GLOW_PROJ.maxLat-GLOW_PROJ.minLat)*h;
+  const isSunrise = metric === "sunrise";
+  const vKey = isSunrise ? "sunrise" : "sunset";
+  const lvKey = isSunrise ? "sunrise_level" : "sunset_level";
+  const tmKey = isSunrise ? "sunrise_time" : "sunset_time";
+  const name = isSunrise ? "朝霞" : "晚霞";
+  const other = isSunrise ? "晚霞" : "朝霞";
+  list.forEach(cty=>{
+    const v = cty[vKey];
+    const col = glowColor(v);
+    const g = el("g",{class:"gcity"});
+    const dot = el("circle",{cx:X(cty.lon), cy:Y(cty.lat), r:5, fill:col,
+      stroke:"#0b1830", "stroke-width":1.5, opacity:v==null?0.35:1});
+    g.appendChild(dot);
+    g.style.cursor = "pointer";
+    g.addEventListener("mouseenter", ()=>{
+      $("glowDetail").innerHTML =
+        `「<b>${cty.name}</b>」${name}指数 <b style="color:${col}">${v!=null?Math.round(v):"--"}</b>` +
+        `（${cty[lvKey]||"—"}）${cty[tmKey]?` · ${name==="晚霞"?"日落":"日出"} <b>${cty[tmKey]}</b>`:""}` +
+        ` · ${other} ${cty[other==="朝霞"?"sunrise":"sunset"]!=null?Math.round(cty[other==="朝霞"?"sunrise":"sunset"]):"--"}`;
+      dot.setAttribute("r", 7.5); dot.setAttribute("stroke-width", 2.5);
+      dot.setAttribute("stroke", "#ffffff");
+    });
+    g.addEventListener("mouseleave", ()=>{
+      dot.setAttribute("r", 5); dot.setAttribute("stroke-width", 1.5);
+      dot.setAttribute("stroke", "#0b1830");
+    });
+    svg.appendChild(g);
+  });
+  const legend = $("glowLegend");
+  legend.innerHTML = [
+    ["≥75 极佳","#ff4d6d"],["50–74 佳","#ff9f43"],["30–49 一般","#ffd166"],
+    ["<30 平淡","#5b7c9c"],["数据缺失","#3a516e"]
+  ].map(([t,cl])=>`<span><i style="background:${cl}"></i>${t}</span>`).join("");
+  $("glowHint").textContent = `全国 ${list.length} 城 · 圆点颜色 = ${name}指数`;
+  if(!list.length) $("glowDetail").textContent = "霞光地图数据获取中，请稍后刷新…";
+}
+
+/* ================= 交互 ================= */
+function toast(msg){const t=$("toast");t.textContent=msg;t.classList.add("show");
+  clearTimeout(toast._tm);toast._tm=setTimeout(()=>t.classList.remove("show"),2600);}
+function loading(on){$("loading").classList.toggle("hide",!on);}
+function tick(){
+  const n=new Date(),p=x=>String(x).padStart(2,"0");
+  $("clock").textContent=`${p(n.getHours())}:${p(n.getMinutes())}`;
+  $("date").textContent=`${n.getFullYear()}年${p(n.getMonth()+1)}月${p(n.getDate())}日`;
+}
+setInterval(tick,1000);tick();
+
+/* pywebview 6.x 的 js_api 在 JS 端返回 Promise，必须 .then()/await 取值；
+   Python 侧方法为同步实现。 */
+$("btnLocate").onclick=()=>{loading(true);api.locate().then(render).catch(err).finally(()=>loading(false));};
+$("btnSearch").onclick=()=>doSearch($("cityInput").value.trim());
+$("cityInput").addEventListener("keydown",e=>{if(e.key==="Enter")doSearch($("cityInput").value.trim());});
+$("btnUnit").onclick=()=>{loading(true);api.toggle_unit().then(d=>{$("btnUnit").textContent=d.unit==="f"?"°C":"°F";render(d);}).catch(err).finally(()=>loading(false));};
+$("btnRefresh").onclick=()=>{loading(true);api.refresh().then(render).catch(err).finally(()=>loading(false));};
+function openSettings(){
+  const s = runtimeSettings;
+  $("setModel").value = s.open_meteo_models || "";
+  $("setOfficial").checked = s.show_official !== false;
+  $("setNmc").checked = s.nmc_warnings !== false;
+  $("setTyphoon").checked = s.typhoon_warnings !== false;
+  $("settingsModal").classList.add("show");
+}
+function closeSettings(){ $("settingsModal").classList.remove("show"); }
+$("btnSettings").onclick=openSettings;
+$("settingsCancel").onclick=closeSettings;
+$("settingsModal").addEventListener("click", ev=>{ if(ev.target.id==="settingsModal") closeSettings(); });
+$("settingsSave").onclick=()=>{
+  const updates = [
+    ["open_meteo_models", $("setModel").value],
+    ["show_official", $("setOfficial").checked],
+    ["nmc_warnings", $("setNmc").checked],
+    ["typhoon_warnings", $("setTyphoon").checked]
+  ];
+  Promise.all(updates.map(([k,v])=>api.set_setting(k, v).then(r=>r.settings))).then(all=>{
+    if(all.length) runtimeSettings = all[all.length-1];
+    closeSettings();
+    toast("设置已保存，正在刷新…");
+    loading(true);
+    api.refresh().then(render).catch(err).finally(()=>loading(false));
+  }).catch(()=>toast("保存设置失败"));
+};
+
+$("btnSpeak").onclick=speakNews;
+$("btnStop").onclick=()=>{ if("speechSynthesis" in window) speechSynthesis.cancel(); toast("已停止播报"); };
+$("warnList").addEventListener("click", (ev)=>{
+  const w = ev.target.closest ? ev.target.closest(".warn") : null;
+  if(!w) return;
+  const url = w.getAttribute("data-url") || "";
+  if(!url){ toast("该预警暂无详情页"); return; }
+  if(window.pywebview && window.pywebview.api && api.open_url){
+    api.open_url(url).then(r=>{ if(r && !r.ok) toast("无法打开链接"); });
+  } else {
+    window.open(url, "_blank");
+  }
+});
+$("glowMetricSunset").onclick=()=>{glowMetric="sunset";
+  $("glowMetricSunset").classList.add("active");$("glowMetricSunrise").classList.remove("active");
+  if(lastData) drawGlowMap(lastData, glowMetric);};
+$("glowMetricSunrise").onclick=()=>{glowMetric="sunrise";
+  $("glowMetricSunrise").classList.add("active");$("glowMetricSunset").classList.remove("active");
+  if(lastData) drawGlowMap(lastData, glowMetric);};
+
+function doSearch(city){if(!city)return;loading(true);api.search(city).then(render).catch(err).finally(()=>loading(false));}
+function speakNews(){
+  const txt=$("newsText").textContent;
+  if(!txt) return toast("暂无新闻内容");
+  if(!("speechSynthesis" in window)) return toast("当前环境不支持语音播报");
+  speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(txt);
+  u.lang="zh-CN"; u.rate=1.0; u.pitch=1.0;
+  const zh=speechSynthesis.getVoices().find(v=>/zh/i.test(v.lang));
+  if(zh) u.voice=zh;
+  speechSynthesis.speak(u);
+  toast("正在播报天气新闻…");
+}
+
+function err(e){console.error(e);toast("获取数据失败，请重试");loading(false);}
+
+/* ================= 全国城市选择器 ================= */
+function initCitySelect(){
+  const sel = $("citySelect");
+  (window.CHINA_CITIES||[]).forEach(g=>{
+    const og = document.createElement("optgroup");
+    og.label = g.p;
+    (g.c||[]).forEach(city=>{
+      const opt = document.createElement("option");
+      opt.value = city; opt.textContent = city;
+      og.appendChild(opt);
+    });
+    sel.appendChild(og);
+  });
+  sel.addEventListener("change", ()=>{
+    const v = sel.value;
+    sel.value = "";
+    if(v) doSearch(v);
+  });
+}
+
+/* ================= 启动：等待本地数据桥就绪 ================= */
+function boot(){
+  initCitySelect();
+  if(window.pywebview && window.pywebview.api){
+    api = window.pywebview.api;
+    loading(true);
+    api.get_state().then(s=>{renderHist(s.history||[]);});
+    if(api.get_settings) api.get_settings().then(s=>{ runtimeSettings = s||{}; });
+    const q=new URLSearchParams(location.search);
+    const c=q.get("city");
+    const first = c ? api.search(c) : api.locate();
+    first.then(render).catch(err).finally(()=>loading(false));
+
+  } else {
+    if(++boot._t > 90){  // 约 9 秒超时
+      document.body.innerHTML=`<div style="color:#ffd166;padding:80px;text-align:center;font-family:'Microsoft YaHei UI';font-size:17px;line-height:2">
+        ⚠ 无法连接本地数据服务<br>
+        <span style="font-size:13px;color:#8fa6c0">请关闭本窗口后重新启动程序；若仍失败请检查是否已安装 pywebview（python -m pip install pywebview）</span></div>`;
+    } else {
+      setTimeout(boot, 100);
+    }
+  }
+}
+boot._t = 0;
+
+setTimeout(boot, 100);
+</script>
+</body>
+</html>

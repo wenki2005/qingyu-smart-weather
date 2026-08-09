@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# 环境变量（含密钥，勿提交）
+.env
+
+# 测试与覆盖率
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+
+# 本地运行数据（不提交）
+weather_desktop_history.json
+weather_desktop_settings.json
