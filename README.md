@@ -6,6 +6,8 @@
 
 > 兼容 **Python 3.9+**；数据源 Open-Meteo（免费、无 API Key、覆盖全球）+ 中国天气网官方实况/预报
 > + 中央气象台在线预警与台风路径（均免费、无需 Key）。
+>
+> 🔗 GitHub：https://github.com/wenki2005/qingyu-smart-weather
 
 ---
 
