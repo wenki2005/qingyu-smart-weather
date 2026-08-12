@@ -30,3 +30,6 @@ Thumbs.db
 # 本地运行数据（不提交）
 weather_desktop_history.json
 weather_desktop_settings.json
+
+# 本地备份压缩包
+weather-push-service.rar

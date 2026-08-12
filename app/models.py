@@ -153,6 +153,21 @@ class ViewingRecommendation:
 
 
 @dataclass
+class AstroEvent:
+    """特殊天文现象（流星雨 / 极光 / 日月食 / 超级月亮）。"""
+    kind: str                        # meteor_shower / aurora / eclipse / supermoon
+    title: str
+    icon: str
+    when: str = ""                   # 时间提示（今晚极大 / 未来 3 天 / X月X日）
+    score: int = 0                   # 观测指数 0-100
+    level: str = "低"                # 高 / 中 / 低
+    summary: str = ""
+    detail: str = ""
+    source: str = ""
+    best_time: Optional[str] = None
+
+
+@dataclass
 class WeatherReport:
     """一次完整的推送内容（组合多个数据源）。"""
 
@@ -167,6 +182,7 @@ class WeatherReport:
     life_indices: list[LifeIndex] = field(default_factory=list)
     glow_map: list[GlowCity] = field(default_factory=list)
     official: Optional[dict] = None   # 中国天气网官方实况/今日预报
+    astro_events: list[AstroEvent] = field(default_factory=list)   # 特殊天象播报
 
     def to_message(self) -> dict[str, str]:
         """转换为各渠道推送所需的 {title, content} 结构。"""

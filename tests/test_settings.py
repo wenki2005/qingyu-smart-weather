@@ -8,11 +8,12 @@ from weather_desktop import DEFAULT_RUNTIME_SETTINGS, DesktopAPI
 
 @pytest.fixture
 def api(tmp_path, monkeypatch):
+    """构造 DesktopAPI，并把设置文件重定向到临时目录（隔离真实用户设置）。"""
     from app.config import Settings
-    obj = DesktopAPI(Settings(city="北京"))
-    monkeypatch.setattr(obj, "_settings_path", lambda: str(tmp_path / "settings.json"))
-    return obj
-
+    # 在构造前就替换路径：构造时会读取 settings.json，若指向项目根目录会
+    # 读到用户实际运行留下的 weather_desktop_settings.json，导致断言不稳定。
+    monkeypatch.setattr(DesktopAPI, "_settings_path", lambda self: str(tmp_path / "settings.json"))
+    return DesktopAPI(Settings(city="北京"))
 
 def test_default_settings(api):
     s = api.get_settings()

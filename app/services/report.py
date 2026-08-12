@@ -7,6 +7,7 @@ from typing import Optional
 
 from ..config import Settings
 from ..models import Location, WeatherReport
+from .astronomy import build_astronomy
 from .glow_map import GlowMapService
 from .life import LifeIndexService
 from .moon import compute_moon_viewing
@@ -79,6 +80,12 @@ async def build_report(
     # 赏月指南（今晚 = 今日 20 点后 + 明日凌晨）
     extra_hours = daily[1].hours if len(daily) > 1 else None
     report.moon = compute_moon_viewing(today, extra_hours=extra_hours)
+
+    # 特殊天象播报（流星雨 / 极光 / 日月食 / 超级月亮）
+    try:
+        report.astro_events = await build_astronomy(location.latitude, daily)
+    except Exception as e:
+        logger.warning("天象播报计算失败: %s", e)
 
     # 特殊天气（规则引擎）
     report.warnings = warnings_svc.detect_rules(daily)

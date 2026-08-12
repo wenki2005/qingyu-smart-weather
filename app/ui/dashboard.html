@@ -294,6 +294,25 @@ body{
   border:1px solid rgba(127,212,255,.35);border-radius:99px;padding:1px 8px;
   margin-left:7px;vertical-align:1.5px}
 
+/* 特殊天象 */
+.g-astro{grid-template-columns:1fr}
+.astro{display:flex;align-items:flex-start;gap:12px;border-radius:14px;padding:12px 14px;
+  border:1px solid var(--card-brd);background:linear-gradient(90deg,rgba(139,124,246,.10),rgba(139,124,246,.02));
+  margin-bottom:8px;transition:all .22s ease;animation:rise .5s both}
+.astro:hover{border-color:rgba(139,124,246,.5);transform:translateX(4px)}
+.astro .ic{font-size:24px;flex:0 0 auto}
+.astro .nm{font-size:13.5px;font-weight:700;letter-spacing:.06em}
+.astro .lv{font-size:10.5px;letter-spacing:.14em;color:var(--violet);margin:2px 0 4px}
+.astro .sm{font-size:11.5px;color:var(--tx);line-height:1.6}
+.astro .dt{font-size:10.5px;color:var(--faint);line-height:1.65;margin-top:4px}
+.astro .when{font-size:10px;font-family:var(--mono);color:var(--ice);
+  border:1px solid rgba(127,212,255,.35);border-radius:99px;padding:1px 8px;margin-left:7px;vertical-align:1.5px}
+.astro .score{margin-left:auto;font-family:var(--mono);font-size:13px;color:var(--gold);flex:0 0 auto}
+#astroList{max-height:360px;overflow-y:auto;padding-right:6px;scrollbar-width:thin;
+  scrollbar-color:rgba(139,124,246,.3) transparent}
+#astroList::-webkit-scrollbar{width:5px}
+#astroList::-webkit-scrollbar-thumb{background:rgba(139,124,246,.3);border-radius:99px}
+
 .g-glow{grid-template-columns:1fr}
 .glow-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
 .glow-hint{font-size:11px;color:var(--faint);font-family:var(--mono);letter-spacing:.08em}
@@ -309,7 +328,7 @@ body{
 .g-moon{grid-template-columns:1fr 1fr}
 .g-news{grid-template-columns:1fr}
 .g-rec{grid-template-columns:1fr}
-@media (max-width:940px){ .g-hero,.g-map,.g-fc,.g-low,.g-rec,.g-moon,.g-news{grid-template-columns:1fr} }
+@media (max-width:940px){ .g-hero,.g-map,.g-fc,.g-low,.g-rec,.g-moon,.g-astro,.g-news{grid-template-columns:1fr} }
 </style>
 </head>
 <body>
@@ -434,6 +453,14 @@ body{
     <div class="card" style="animation-delay:.64s">
       <div class="sec-tag">LIFE · 生活指数</div>
       <div class="life" id="lifeList"></div>
+    </div>
+  </div>
+
+  <div class="grid g-astro">
+    <div class="card" style="animation-delay:.66s">
+      <div class="sec-tag">ASTRONOMY · 特殊天象</div>
+      <div class="glow-hint" style="margin-bottom:12px">流星雨 · 极光 · 日月食 · 超级月亮（数据源免费无 Key）</div>
+      <div id="astroList"></div>
     </div>
   </div>
 
@@ -592,6 +619,7 @@ function render(d){
      <div class="sm">${r.summary||""}</div></div><span class="score">${r.score}</span></div>`).join("");
   // 赏月 / 生活指数 / 天气新闻 / 带伞提醒
   renderMoon(d.moon);
+  renderAstro(d.astro||[]);
   renderLife(d.life||[]);
   $("newsText").textContent = d.news||"";
   if(d.rain_at){ $("sunline").innerHTML += `<span style="color:var(--ice)">带伞 <b>${d.rain_at}</b></span>`; }
@@ -613,6 +641,22 @@ function renderMoon(m){
   $("moonMeta").innerHTML = meta.join(" · ")||"—";
   $("moonTip").textContent = m.tips||m.reason||"";
 }
+function renderAstro(list){
+  const box = $("astroList");
+  if(!list || !list.length){ box.innerHTML = `<div class="empty">近期暂无特殊天象，天空平静。</div>`; return; }
+  const LV = {"高":"var(--gold)","中":"var(--amber)","低":"#5b7c9c"};
+  box.innerHTML = list.map((a,i)=>`
+    <div class="astro" style="animation-delay:${i*.06}s">
+      <span class="ic">${a.icon}</span>
+      <div class="tx"><div class="nm">${a.title}${a.when?`<span class="when">${a.when}</span>`:""}</div>
+        <div class="lv" style="color:${LV[a.level]||"var(--amber)"}">${a.level} · 观测指数 ${a.score}</div>
+        <div class="sm">${a.summary||""}</div>
+        ${a.detail?`<div class="dt">${a.detail}</div>`:""}
+      </div>
+      <span class="score">${a.score}</span>
+    </div>`).join("");
+}
+
 function renderLife(list){
   $("lifeList").innerHTML = list.length? list.map(x=>
     `<div class="it"><b>${x.icon} ${x.name}</b><div class="lv">${x.level}</div><span>${x.advice}</span></div>`).join("")

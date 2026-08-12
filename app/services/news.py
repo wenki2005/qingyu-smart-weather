@@ -65,6 +65,11 @@ def build_news_bulletin(report: WeatherReport) -> str:
             f"赏月指数{m.score:.0f}%，{m.level}，最佳赏月时段在{m.best_time or '晚间'}前后。"
         )
 
+    if report.astro_events:
+        picks = "；".join(
+            f"{a.icon}{a.title}：{a.summary}" for a in report.astro_events[:3]
+        )
+        lines.append(f"天象方面：{picks}。")
     if report.life_indices:
         top = report.life_indices[:3]
         picks = "；".join(f"{x.icon}{x.name}：{x.level}" for x in top)

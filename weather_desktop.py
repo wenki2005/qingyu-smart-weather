@@ -338,6 +338,12 @@ class DesktopAPI:
             "glow_map": glow_map,
             "sunset": sunset,
             "moon": moon,
+            "astro": [
+                {"icon": a.icon, "kind": a.kind, "title": a.title, "when": a.when or "",
+                 "score": a.score, "level": a.level, "summary": a.summary or "",
+                 "detail": a.detail or "", "best_time": a.best_time or ""}
+                for a in (r.astro_events or [])
+            ],
             "life": life,
             "news": self._news_bulletin(r),
             "rain_at": rain_at,
@@ -494,6 +500,10 @@ async def cli_run(city: Optional[str]) -> int:
         if m:
             print(f"赏月：月相「{m['phase']}」照明 {m['illuminated']:.0f}%  指数 {m['score']:.0f}%（{m['level']}）"
                   + (f"  最佳时段 {m['best_time']}" if m.get("best_time") else ""))
+        if data.get("astro"):
+            print("特殊天象：")
+            for a in data["astro"][:4]:
+                print(f"  · {a['icon']} {a['title']}（{a['when'] or '--'}）[{a['level']}] {a['score']}  {a['summary']}")
         if data.get("life"):
             print("生活指数：" + "  ".join(
                 f"{x['icon']}{x['name']}:{x['level']}" for x in data["life"]))

@@ -25,6 +25,7 @@
 | 🗾 霞光地图 | 全国 37 座主要城市朝霞/晚霞指数热力地图（鼠标悬停查看详情，晚霞/朝霞可切换） |
 | ✨ 观赏推荐 | 朝霞、晚霞、星空、彩虹、云海、雪景、赏月七类观赏指数（今日/明日自动去重） |
 | 🌙 赏月指南 | 月相（近似天文算法，无需 API）+ 照明度 + 赏月指数 + 最佳赏月时段 |
+| 🌌 特殊天象 | 流星雨（活跃度 × 月光 × 云量修正）、极光（Kp 指数 + 纬度可见性）、日月食与超级月亮预告；数据源免费无 Key（NOAA SWPC / 京都 WDC / 内置天象表） |
 | 🧭 生活指数 | 穿衣、带伞、洗车、防晒、运动、晾晒、感冒七项生活建议 |
 | 📰 天气新闻播报 | 自动生成主持人口吻的天气新闻稿，窗口内可语音朗读（Web Speech） |
 | ☂️ 带伞提醒 | 预报未来 12 小时内首次降雨时间，早报自动提示 |
@@ -78,7 +79,7 @@ weather_desktop.py            桌面入口（pywebview 独立窗口 + js_api 数
       │     ├── official.py      中国天气网官方实况/今日预报
       │     ├── geolocation.py   IP 定位（多数据源自动降级）
       │     ├── report.py        数据汇总 build_report
-      │     ├── sunset.py / moon.py / life.py / news.py / recommendation.py
+      │     ├── sunset.py / moon.py / astronomy.py / life.py / news.py / recommendation.py
       │     ├── warnings.py      预警规则引擎 + 台风路径判定 + 在线预警聚合
       │     ├── typhoon.py       台风路径（中央气象台台风网）与影响判定
       │     ├── nmc_alarms.py    中央气象台在线预警（免费、按省/市过滤）
@@ -136,7 +137,7 @@ P = 0.45 × Cloud(云量) + 0.35 × Precip(降水) + 0.10 × Visibility + 0.10 �
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests -v        # 81 个单元测试
+pytest tests -v        # 101 个单元测试
 ruff check app/ tests/ weather_desktop.py   # 代码检查零告警
 ```
 
