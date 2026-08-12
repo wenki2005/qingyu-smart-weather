@@ -3,13 +3,16 @@
 提供流星雨、极光（地磁活动）、日月食、超级月亮等特殊天象的观测指数，
 数据源全部免费、无需 API Key（与项目其余数据源保持一致）：
 
-- **流星雨**：内置常见流星雨表（活跃期 / 极大日期 / ZHR，数据参考
+- **流星雨**：内置常见流星雨表（活跃期 / 极大日期 / ZHR / 可见半球，数据参考
   Stellarium 开源项目 showers.json 与 IMO 国际流星组织公开资料），
-  结合月相照明度与夜间云量修正（月光与云层会掩盖流星）；
+  按**当前地点半球**过滤（北半球 / 南半球），仅展示**临近极大**的流星雨，
+  并结合月相照明度与夜间云量修正（月光与云层会掩盖流星）；
 - **极光**：优先使用 NOAA SWPC 的 Kp 3 天预报（JSON，免费），
   其次用京都世界资料中心（WDC）实测 Kp 兜底，断网时退化为估算基线；
-  按用户纬度评估极光可见性（思路参考 DarkHours 开源项目：Kp + 纬度评分）；
-- **日月食 / 超级月亮**：内置近期重要天象预告表（公开天文日历），按日期自动出现。
+  仅当**所在纬度可见极光**或出现**强地磁暴（Kp≥6）**时才展示，避免对所有
+  纬度无差别推送（思路参考 DarkHours 开源项目：Kp + 纬度评分）；
+- **日月食 / 超级月亮**：内置近期重要天象预告表（公开天文日历），
+  仅展示**未来 30 天**内的事件，避免一次性堆砌全部预告。
 """
 from __future__ import annotations
 
@@ -34,25 +37,35 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MeteorShower:
-    """一个流星雨（日期用 (月, 日) 表示，支持跨年活跃期）。"""
+    """一个流星雨（日期用 (月, 日) 表示，支持跨年活跃期）。
+
+    hemisphere: north=北半球可见 / south=南半球可见 / both=南北半球均可。
+    """
     name: str
     eng: str
     start: tuple[int, int]
     peak: tuple[int, int]
     end: tuple[int, int]
     zhr: int          # 天顶每时出现率（极大时的理论值）
+    hemisphere: str = "north"
     icon: str = "☄️"
 
 
 METEOR_SHOWERS: list[MeteorShower] = [
-    MeteorShower("象限仪座流星雨", "Quadrantids", (12, 28), (1, 4), (1, 12), 110),
-    MeteorShower("天琴座流星雨", "Lyrids", (4, 14), (4, 22), (4, 30), 18),
-    MeteorShower("宝瓶座η流星雨", "Eta Aquariids", (4, 19), (5, 6), (5, 28), 50),
-    MeteorShower("宝瓶座δ南流星雨", "Southern Delta Aquariids", (7, 12), (7, 28), (8, 23), 25),
-    MeteorShower("英仙座流星雨", "Perseids", (7, 17), (8, 13), (8, 24), 100),
-    MeteorShower("猎户座流星雨", "Orionids", (10, 2), (10, 21), (11, 7), 20),
-    MeteorShower("狮子座流星雨", "Leonids", (11, 6), (11, 17), (11, 30), 15),
-    MeteorShower("双子座流星雨", "Geminids", (12, 4), (12, 14), (12, 17), 150),
+    # ---------- 北半球 ----------
+    MeteorShower("象限仪座流星雨", "Quadrantids", (12, 28), (1, 4), (1, 12), 110, "north"),
+    MeteorShower("天琴座流星雨", "Lyrids", (4, 14), (4, 22), (4, 30), 18, "north"),
+    MeteorShower("英仙座流星雨", "Perseids", (7, 17), (8, 13), (8, 24), 100, "north"),
+    MeteorShower("狮子座流星雨", "Leonids", (11, 6), (11, 17), (11, 30), 15, "north"),
+    MeteorShower("双子座流星雨", "Geminids", (12, 4), (12, 14), (12, 17), 150, "north"),
+    # ---------- 南北半球均可 ----------
+    MeteorShower("宝瓶座η流星雨", "Eta Aquariids", (4, 19), (5, 6), (5, 28), 50, "both"),
+    MeteorShower("猎户座流星雨", "Orionids", (10, 2), (10, 21), (11, 7), 20, "both"),
+    # ---------- 南半球 ----------
+    MeteorShower("宝瓶座δ南流星雨", "Southern Delta Aquariids", (7, 12), (7, 28), (8, 23), 25, "south"),
+    MeteorShower("船尾座π流星雨", "Pi Puppids", (4, 15), (4, 23), (4, 28), 40, "south"),
+    MeteorShower("南鱼座流星雨", "Piscis Austrinids", (6, 15), (7, 28), (8, 10), 5, "south"),
+    MeteorShower("矩尺座γ流星雨", "Gamma Normids", (2, 25), (3, 14), (3, 22), 6, "south"),
 ]
 
 
@@ -79,6 +92,13 @@ def _in_window(target: date, start: tuple[int, int], end: tuple[int, int]) -> bo
         return s <= target <= e
     # 跨年窗口：覆盖 [今年 start, 今年底] ∪ [今年初, 今年 end]
     return target >= s or target <= e
+
+
+def _hemisphere_ok(sh: MeteorShower, latitude: float) -> bool:
+    """按当前地点纬度过滤流星雨：北纬看北半球/双半球，南纬看南半球/双半球。"""
+    if latitude >= 0:
+        return sh.hemisphere in ("north", "both")
+    return sh.hemisphere in ("south", "both")
 
 
 def _activity_factor(days_from_peak: int) -> float:
@@ -147,17 +167,26 @@ def _level(score: float) -> str:
 def meteor_shower_events(
     daily: Optional[DailyWeather],
     target: Optional[date] = None,
+    latitude: float = 0.0,
 ) -> list[AstroEvent]:
-    """计算今晚各流星雨的观测指数（活跃度 × 月光 × 云量）。"""
+    """计算今晚各流星雨的观测指数（活跃度 × 月光 × 云量）。
+
+    只展示：1) 与当前纬度半球匹配；2) 处于活跃期且临近极大（距极大 ≤4 天）。
+    避免把尚在活跃期但早已远离极大的流星雨也一并展示。
+    """
     target = target or date.today()
     _, illuminated = moon_phase(target)
     cloud = _night_cloud(daily)
     events: list[AstroEvent] = []
     for sh in METEOR_SHOWERS:
+        if not _hemisphere_ok(sh, latitude):
+            continue
         if not _in_window(target, sh.start, sh.end):
             continue
         days = _days_from_peak(target, sh.peak)
         activity = _activity_factor(days)
+        if activity < 0.20:
+            continue  # 远离极大（约 >4 天），不单独展示
         score = round(100.0 * activity * _moonlight_factor(illuminated) * _cloud_factor(cloud))
         if score <= 0:
             continue
@@ -211,6 +240,9 @@ NOAA_KP_URLS = (
 )
 KYOTO_KP_URL = "http://wdc.kugi.kyoto-u.ac.jp/cgi-bin/kp-cgi"
 
+# 极光展示阈值：Kp 达到该值即为强地磁暴，即使本地纬度不可见也值得提醒
+AURORA_STORM_KP = 6.0
+
 
 def _kp_text(kp: float) -> str:
     """Kp 等级中文描述（NOAA G 等级惯例）。"""
@@ -238,16 +270,17 @@ def aurora_visibility(kp: float, latitude: float) -> tuple[str, str, float]:
     center = 66.5 - max(0.0, kp) * 2.0
     south_edge = center - 3.0
     north_edge = center + 4.0
-    lat = float(latitude)
+    lat = abs(float(latitude))
+    hemi = "北纬" if float(latitude) >= 0 else "南纬"
     if lat >= north_edge:
-        return "头顶可见", f"北纬 {north_edge:.0f}° 以北可仰望头顶极光", 95.0
+        return "头顶可见", f"{hemi} {north_edge:.0f}° 以外可仰望头顶极光", 95.0
     if lat >= south_edge:
         base = 68.0 + (lat - south_edge) / max(0.1, north_edge - south_edge) * 27.0
-        return "天空可见", f"北纬 {south_edge:.0f}°~{north_edge:.0f}° 的天空可见极光", base
+        return "天空可见", f"{hemi} {south_edge:.0f}°~{north_edge:.0f}° 的天空可见极光", base
     if lat >= south_edge - 5.0:
         base = 38.0 + (lat - (south_edge - 5.0)) / 5.0 * 30.0
-        return "地平线可见", f"北纬 {south_edge - 5.0:.0f}°~{south_edge:.0f}° 仅在地平线附近可见", base
-    return "基本无缘", f"极光带目前在北纬 {south_edge:.0f}° 附近，你所在纬度难以直接观测", 6.0
+        return "地平线可见", f"{hemi} {south_edge - 5.0:.0f}°~{south_edge:.0f}° 仅在地平线附近可见", base
+    return "基本无缘", f"极光带目前在高纬度 {south_edge:.0f}° 附近，你所在纬度难以直接观测", 6.0
 
 
 def aurora_event(
@@ -271,12 +304,18 @@ def aurora_event(
             source=source_label,
             best_time="午夜前后（地磁活跃时）",
         )
-    _, desc, base = aurora_visibility(kp, latitude)
+    status, desc, base = aurora_visibility(kp, latitude)
     cloud = _night_cloud(daily)
     cloud_f = _cloud_factor(cloud)
     score = round(base * cloud_f)
     detail = f"{desc}；当前 Kp≈{kp:.1f}（{_kp_text(kp)}）。"
-    if cloud is not None:
+    if status == "基本无缘" and kp >= AURORA_STORM_KP:
+        hemi = "北方" if latitude >= 0 else "南方"
+        detail = (
+            f"发生强地磁暴（Kp≈{kp:.1f}），{hemi}高纬度地区可能看到极光；"
+            f"你所在纬度（{abs(latitude):.0f}°）难以直接观测，可关注摄影直播。"
+        )
+    elif cloud is not None:
         detail += f"夜间云量 {cloud:.0f}%，"
         detail += "晴朗窗口更利于观测。" if cloud < 50 else "云层可能遮挡极光。"
     else:
@@ -379,8 +418,8 @@ UPCOMING_EVENTS: list[tuple[date, str, str, str]] = [
 ]
 
 
-def special_events(target: Optional[date] = None, horizon_days: int = 180) -> list[AstroEvent]:
-    """返回近期（默认 180 天内）的日月食 / 超级月亮预告。"""
+def special_events(target: Optional[date] = None, horizon_days: int = 30) -> list[AstroEvent]:
+    """返回近期（默认 30 天内）的日月食 / 超级月亮预告，避免一次性堆砌全部事件。"""
     target = target or date.today()
     events: list[AstroEvent] = []
     for ev_date, title, icon, desc in UPCOMING_EVENTS:
@@ -415,6 +454,10 @@ def special_events(target: Optional[date] = None, horizon_days: int = 180) -> li
 # --------------------------------------------------------------------------- #
 # 服务入口
 # --------------------------------------------------------------------------- #
+
+# 天象卡片最多展示条数（避免一次性堆砌）
+MAX_ASTRO_EVENTS = 5
+
 
 class AstronomyService:
     """天象播报服务：拉取 Kp（NOAA 预报 → 京都实测 → 估算基线）并组装天象列表。"""
@@ -482,15 +525,16 @@ class AstronomyService:
         daily: list[DailyWeather],
         target: Optional[date] = None,
     ) -> list[AstroEvent]:
-        """组装全部天象播报事件。"""
+        """组装天象播报事件（按地点与事件相关性过滤，最多 MAX_ASTRO_EVENTS 条）。"""
         target = target or date.today()
         events: list[AstroEvent] = []
         today = daily[0] if daily else None
 
-        # 流星雨（本地计算，无需网络）
-        events.extend(meteor_shower_events(today, target))
+        # 流星雨（本地计算，无需网络；按半球 + 临近极大过滤）
+        events.extend(meteor_shower_events(today, target, latitude=latitude))
 
-        # 极光：NOAA 预报优先，京都实测兜底，均失败则用估算基线
+        # 极光：NOAA 预报优先，京都实测兜底，均失败则用估算基线。
+        # 仅当「所在纬度可见」或「发生强地磁暴」时才展示，避免无差别推送。
         kp, when, source = None, "当前", "估算基线"
         forecast = await self.fetch_kp_forecast()
         if forecast is not None:
@@ -502,15 +546,17 @@ class AstronomyService:
             else:
                 kp = estimate_baseline_kp()
                 when, source = "当前", "估算基线（未联网）"
-        events.append(aurora_event(kp, latitude, today, source, when))
+        aurora = aurora_event(kp, latitude, today, source, when)
+        if aurora.score >= 30 or (kp is not None and kp >= AURORA_STORM_KP):
+            events.append(aurora)
 
-        # 日月食 / 超级月亮预告
+        # 日月食 / 超级月亮预告（仅未来 30 天）
         events.extend(special_events(target))
 
-        # 排序：评分高的在前，评分相同按 kind 固定顺序
+        # 排序：评分高的在前，评分相同按 kind 固定顺序；并限制展示条数
         order = {"meteor_shower": 0, "aurora": 1, "eclipse": 2, "supermoon": 3}
         events.sort(key=lambda e: (-e.score, order.get(e.kind, 9)))
-        return events
+        return events[:MAX_ASTRO_EVENTS]
 
 
 async def build_astronomy(

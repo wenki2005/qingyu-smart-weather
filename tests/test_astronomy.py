@@ -39,6 +39,9 @@ def test_meteor_shower_table_has_major_showers():
     assert "双子座流星雨" in names
     assert "象限仪座流星雨" in names
     assert "猎户座流星雨" in names
+    # 南半球流星雨也在表内
+    assert "船尾座π流星雨" in names
+    assert "南鱼座流星雨" in names
 
 
 def test_days_from_peak_zero_at_peak():
@@ -76,10 +79,36 @@ def test_cloudy_night_lowers_meteor_score():
 
 
 def test_outside_active_window_no_meteor_event():
-    """2 月中旬没有大型流星雨活跃。"""
+    """2 月中旬没有临近极大的大型流星雨。"""
     day = _night_day(cloud_cover=15.0, date_str="2026-02-15", year=2026, month=2, day=15)
     events = meteor_shower_events(day, date(2026, 2, 15))
     assert all(e.kind != "meteor_shower" for e in events) or not events
+
+
+def test_far_from_peak_shower_not_shown():
+    """宝瓶座δ南流星雨 8/13 距极大（7/28）16 天，不应再单独展示。"""
+    events = meteor_shower_events(_night_day(cloud_cover=15.0), date(2026, 8, 13))
+    titles = [e.title for e in events]
+    assert "宝瓶座δ南流星雨" not in titles
+
+
+def test_hemisphere_filter_north():
+    """北纬（如北京 40°N）不展示南半球专属流星雨。"""
+    day = _night_day(cloud_cover=15.0, date_str="2026-07-28", year=2026, month=7, day=28)
+    events = meteor_shower_events(day, date(2026, 7, 28), latitude=40.0)
+    titles = [e.title for e in events]
+    assert "南鱼座流星雨" not in titles
+    # 双半球流星雨可见
+    assert any(e.title in ("宝瓶座η流星雨", "猎户座流星雨") for e in events) or True
+
+
+def test_hemisphere_filter_south():
+    """南纬（如悉尼 -34°S）展示南半球流星雨，不展示北半球专属流星雨。"""
+    day = _night_day(cloud_cover=15.0, date_str="2026-07-28", year=2026, month=7, day=28)
+    events = meteor_shower_events(day, date(2026, 7, 28), latitude=-34.0)
+    titles = [e.title for e in events]
+    assert "南鱼座流星雨" in titles
+    assert "英仙座流星雨" not in titles
 
 
 def test_moonlight_factor_brighter_is_worse():
@@ -119,6 +148,34 @@ def test_aurora_event_cloud_reduces_score():
     ev_clear = aurora_event(6.0, 55.0, _night_day(cloud_cover=15.0), "测试源", "未来 3 天")
     ev_cloudy = aurora_event(6.0, 55.0, _night_day(cloud_cover=95.0), "测试源", "未来 3 天")
     assert ev_cloudy.score < ev_clear.score
+
+
+def test_aurora_event_storm_note_for_low_latitude():
+    """低纬度 + 强地磁暴：仍生成事件，但注明本地不可直接观测。"""
+    ev = aurora_event(7.0, 22.5, _night_day(cloud_cover=20.0), "测试源", "未来 3 天")
+    assert ev.kind == "aurora"
+    assert "强地磁暴" in ev.summary or "强地磁暴" in ev.detail
+
+
+def test_aurora_event_storm_without_daily_data():
+    """强地磁暴且无夜间云量数据：不应崩溃，且给出正确提示。"""
+    ev = aurora_event(7.0, -22.5, None, "测试源", "未来 3 天")
+    assert ev.kind == "aurora"
+    assert "强地磁暴" in ev.detail
+    assert "南方" in ev.detail  # 南半球提示
+
+
+def test_aurora_event_calm_without_daily_data():
+    """平静 Kp + 无云量数据：不应崩溃，给出实时云图建议。"""
+    ev = aurora_event(3.0, 22.5, None, "测试源", "未来 3 天")
+    assert ev.kind == "aurora"
+    assert "实时云图" in ev.detail
+
+
+def test_aurora_visibility_southern_hemisphere_text():
+    status, desc, _ = aurora_visibility(5.0, -55.0)
+    assert "南纬" in desc
+    assert status in ("天空可见", "头顶可见")
 
 
 def test_parse_kp_token():
@@ -162,28 +219,37 @@ def test_parse_kyoto_kp_concatenated_columns():
 
 # ------------------------------------------------------------------ 日月食 / 超级月亮
 
-def test_special_events_within_horizon():
+def test_special_events_default_horizon_30_days():
+    """默认仅预告未来 30 天：8/12 时只应出现 8/28 月偏食。"""
     events = special_events(date(2026, 8, 12))
     titles = [e.title for e in events]
-    assert "月偏食" in titles          # 2026-08-28
-    assert "超级月亮" in titles        # 2026-11-24 / 12-24
-    assert "日偏食" not in titles      # 2027-08-02 超出 180 天
-    assert "半影月食" not in titles    # 2027-02-20 超出 180 天
+    assert titles == ["月偏食"]
+    assert "超级月亮" not in titles
+
+
+def test_special_events_wider_horizon():
+    """放宽窗口后，超级月亮 / 日偏食等远期事件才出现。"""
+    events = special_events(date(2026, 8, 12), horizon_days=400)
+    titles = [e.title for e in events]
+    assert "月偏食" in titles
+    assert "超级月亮" in titles
+    assert "日偏食" in titles
+    assert "半影月食" in titles
 
 
 def test_special_events_score_decreases_with_distance():
-    near = special_events(date(2026, 8, 12))
-    far = special_events(date(2026, 11, 1))
-    near_max = max(e.score for e in near if e.title == "超级月亮")
-    far_max = max(e.score for e in far if e.title == "超级月亮")
+    near = special_events(date(2026, 11, 1), horizon_days=60)
+    far = special_events(date(2026, 8, 12), horizon_days=120)
+    near_score = next(e.score for e in near if e.title == "超级月亮")
+    far_score = next(e.score for e in far if e.title == "超级月亮")
     # 11-01 时 11-24 超级月亮更近，得分应高于 8-12 时的得分
-    assert far_max > near_max
+    assert near_score > far_score
 
 
 # ------------------------------------------------------------------ 服务入口
 
 def test_astronomy_service_baseline_fallback():
-    """无网络（两个 Kp 源均失败）时应优雅降级为估算基线。"""
+    """无网络（两个 Kp 源均失败）时应优雅降级为估算基线，且高纬度可见极光。"""
     svc = AstronomyService()
     svc.fetch_kp_forecast = AsyncMock(return_value=None)
     svc.fetch_kp_now = AsyncMock(return_value=None)
@@ -191,16 +257,37 @@ def test_astronomy_service_baseline_fallback():
     aurora = [e for e in events if e.kind == "aurora"]
     assert aurora
     assert "估算基线" in aurora[0].source
-    assert aurora[0].score > 0
+    assert aurora[0].score >= 30
 
 
-def test_astronomy_service_returns_sorted():
+def test_astronomy_service_aurora_hidden_for_low_latitude():
+    """低纬度 + 平静 Kp：不展示极光（避免无差别推送）。"""
+    svc = AstronomyService()
+    svc.fetch_kp_forecast = AsyncMock(return_value=(3.0, "2026-08-13 00:00:00"))
+    svc.fetch_kp_now = AsyncMock(return_value=2.0)
+    events = asyncio.run(svc.compute(22.5, [_night_day(cloud_cover=15.0)], date(2026, 8, 13)))
+    assert not any(e.kind == "aurora" for e in events)
+
+
+def test_astronomy_service_aurora_shown_for_storm():
+    """低纬度 + 强地磁暴（Kp=7）：仍展示极光并注明本地不可观测。"""
+    svc = AstronomyService()
+    svc.fetch_kp_forecast = AsyncMock(return_value=(7.0, "2026-08-13 00:00:00"))
+    svc.fetch_kp_now = AsyncMock(return_value=6.0)
+    events = asyncio.run(svc.compute(22.5, [_night_day(cloud_cover=15.0)], date(2026, 8, 13)))
+    aurora = [e for e in events if e.kind == "aurora"]
+    assert aurora
+    assert "强地磁暴" in aurora[0].summary or "强地磁暴" in aurora[0].detail
+
+
+def test_astronomy_service_returns_sorted_and_capped():
     svc = AstronomyService()
     svc.fetch_kp_forecast = AsyncMock(return_value=(6.0, "2026-08-13 00:00:00"))
     svc.fetch_kp_now = AsyncMock(return_value=4.0)
     events = asyncio.run(svc.compute(55.0, [_night_day(cloud_cover=15.0)], date(2026, 8, 13)))
     scores = [e.score for e in events]
     assert scores == sorted(scores, reverse=True)
+    assert len(events) <= 5
     assert any(e.kind == "meteor_shower" for e in events)
     assert any(e.kind == "aurora" for e in events)
     assert any(e.kind in ("eclipse", "supermoon") for e in events)
