@@ -144,3 +144,17 @@ async def test_detect_typhoon_when_far_away(settings):
     warns = await svc.detect_typhoon(30.29, 120.16)
     assert warns == []
     await svc.aclose()
+
+
+
+def test_rule_engine_ignores_past_and_far_hours():
+    """规则预警只看传入 now 后的 24 小时，不把已过去/第三天风险算入当前。"""
+    base = datetime(2026, 9, 4, 0, 0)
+    first = [make_hour(base + timedelta(hours=i), wind_speed=3.0) for i in range(24)]
+    first[2] = make_hour(base + timedelta(hours=2), wind_speed=3.0)
+    later = [make_hour(base + timedelta(days=2, hours=i), wind_speed=30.0) for i in range(24)]
+    warns = RuleEngine(Settings(city="北京")).detect(
+        [make_day(date="2026-09-04", hours=first), make_day(date="2026-09-06", hours=later)],
+        now=datetime(2026, 9, 4, 12, 0),
+    )
+    assert not any("风" in warning.title for warning in warns)

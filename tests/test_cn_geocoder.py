@@ -108,15 +108,13 @@ async def test_coords_for_open_meteo_province_match_when_no_county():
 
 
 @pytest.mark.asyncio
-async def test_geocode_cn_small_city_via_pinyin_when_no_county():
-    """县级库被禁用时，桐乡经 weather.com.cn + Open-Meteo 拼音（梧桐）命中。"""
+async def test_geocode_cn_rejects_unrelated_same_province_result():
+    """Open-Meteo 只返回同省但名称无关地点时，不能误定位到该地点。"""
     geo._COUNTIES_INDEX = {}
     search_payload = '[{"ref":"101210304~zhejiang~桐乡~Tongxiang~桐乡~Tongxiang~573~314500~TX~浙江"}]'
 
     def geo_handler(request):
         q = request.url.params.get("name")
-        if q == "桐乡":
-            return httpx.Response(200, json={"results": []})
         if q == "Tongxiang":
             return httpx.Response(200, json={"results": [
                 {"name": "梧桐", "admin1": "浙江", "admin2": "嘉兴市", "country_code": "CN",
@@ -134,10 +132,7 @@ async def test_geocode_cn_small_city_via_pinyin_when_no_county():
             loc = await geocode_cn(client, "桐乡")
         finally:
             await client.aclose()
-    assert loc is not None
-    assert loc.name == "桐乡"
-    assert loc.admin1 == "浙江"
-    assert abs(loc.latitude - 30.63287) < 1e-4
+    assert loc is None
 
 
 @pytest.mark.asyncio
@@ -187,3 +182,15 @@ async def test_geocode_cn_foreign_paris_direct():
             await client.aclose()
     assert loc is not None
     assert loc.country == "法国"
+
+
+
+def test_build_location_normalizes_admin_fields():
+    loc = geo._build_location(
+        {"name": "鹤山", "province_cn": "广东", "code": "101281102"},
+        {"latitude": 22.77, "longitude": 112.96, "timezone": "Asia/Shanghai",
+         "admin1": "广东省", "admin2": "江门市"},
+    )
+    assert loc.admin1 == "广东"
+    assert loc.admin2 == "江门市"
+    assert loc.admin3 == "鹤山"

@@ -16,10 +16,12 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
 import time
+from dataclasses import replace
 from typing import Optional
 
 import httpx
@@ -74,6 +76,8 @@ FOREIGN_CITIES: dict[str, str] = {
 }
 
 _COUNTIES_INDEX: Optional[dict] = None
+_GEOCODE_CACHE: dict[str, tuple[float, Optional[Location]]] = {}
+_GEOCODE_CACHE_TTL = 600.0
 
 
 def _norm_province(s: Optional[str]) -> str:
@@ -149,13 +153,19 @@ def _from_om(r: dict, fallback_name: str) -> Location:
 async def geocode_cn(client: httpx.AsyncClient, query: str) -> Optional[Location]:
     """中文查询 -> 精确定位（国外映射 / 国内 weather.com.cn + 县级库）。"""
     q = query.strip()
+    now = time.monotonic()
+    cached = _GEOCODE_CACHE.get(q)
+    if cached and now - cached[0] < _GEOCODE_CACHE_TTL:
+        return replace(cached[1]) if cached[1] is not None else None
 
     # 1) 国外城市：内置映射 -> Open-Meteo 英文名
     en = FOREIGN_CITIES.get(q) or FOREIGN_CITIES.get(_strip_city(q))
     if en:
         for r in await _om_search(client, en, count=5):
             if (r.get("country_code") or "").upper() != "CN":
-                return _from_om(r, q)
+                loc = _from_om(r, q)
+                _GEOCODE_CACHE[q] = (time.monotonic(), loc)
+                return replace(loc)
 
     # 2) 国内：weather.com.cn 消歧
     try:
@@ -174,12 +184,22 @@ async def geocode_cn(client: httpx.AsyncClient, query: str) -> Optional[Location
         if loc is not None:
             logger.info("中文地理编码：%s -> %s/%s (%.4f, %.4f)",
                         q, loc.name, loc.admin1, loc.latitude, loc.longitude)
-            return loc
+            _GEOCODE_CACHE[q] = (time.monotonic(), loc)
+            return replace(loc)
+
+    # 已得到 weather.com.cn 的国内候选但无法确定坐标时，宁可返回未找到，
+    # 也不能把同名地点的模糊坐标误当成目标城市。
+    if candidates:
+        _GEOCODE_CACHE[q] = (time.monotonic(), None)
+        return None
 
     # 3) 兜底：Open-Meteo 直接查（可命中非中国城市，如「巴黎」）
     for r in await _om_search(client, q, count=10):
         if (r.get("country_code") or "").upper() != "CN":
-            return _from_om(r, q)
+            loc = _from_om(r, q)
+            _GEOCODE_CACHE[q] = (time.monotonic(), loc)
+            return replace(loc)
+    _GEOCODE_CACHE[q] = (time.monotonic(), None)
     return None
 
 
@@ -223,6 +243,7 @@ def _county_location(cand: dict, e: dict) -> Location:
         country="中国",
         admin1=_norm_province(province_cn) or e.get("p", ""),
         admin2=e.get("c") if e.get("c") and e.get("c") != e.get("name") else None,
+        admin3=cand.get("name"),
         wcn_code=cand.get("code") or None,
     )
 
@@ -243,25 +264,46 @@ async def _coords_for(client: httpx.AsyncClient, cand: dict) -> Optional[Locatio
     # 2) Open-Meteo 同省匹配
     pinyin = cand["pinyin"]
     bare = _strip_city(name)
-    targets = [
-        name, bare,
-        f"{name}市", f"{name}县", f"{name}区", f"{name}镇",
-        f"{bare}市", f"{bare}县", f"{bare}区", f"{bare}镇",
-        pinyin, f"{pinyin}shi", f"{pinyin}xian", f"{pinyin}zhen",
-    ]
-    seen: set[str] = set()
-    for q in targets:
-        q = q.strip()
-        if not q or q in seen:
-            continue
-        seen.add(q)
+    primary = list(dict.fromkeys(q.strip() for q in (name, bare, pinyin) if q.strip()))
+    batches = await asyncio.gather(*[_om_search(client, q) for q in primary])
+    results = [item for batch in batches for item in batch]
+    chosen = _choose_om_result(results, cand, target_prov)
+    if chosen is not None:
+        return _build_location(cand, chosen)
+
+    # 只有主查询没有命中时才补充后缀查询，避免小城市搜索串行发十几个请求。
+    for q in (f"{bare}市", f"{bare}县", f"{bare}区", f"{bare}镇"):
         for r in await _om_search(client, q):
-            if (r.get("country_code") or "").upper() != "CN":
-                continue
-            if target_prov and _norm_province(r.get("admin1")) != target_prov:
-                continue
-            return _build_location(cand, r)
+            chosen = _choose_om_result([r], cand, target_prov)
+            if chosen is not None:
+                return _build_location(cand, chosen)
     return None
+
+
+def _choose_om_result(results: list[dict], cand: dict, target_prov: str) -> Optional[dict]:
+    """从 Open-Meteo 候选中选择同省且名称最接近的结果。"""
+    name = str(cand.get("name") or "")
+    bare = _strip_city(name)
+    pinyin = str(cand.get("pinyin") or "").strip().lower()
+
+    def rank(item: dict) -> tuple[int, int, int]:
+        if (item.get("country_code") or "").upper() != "CN":
+            return (-1, -1, -1)
+        if target_prov and _norm_province(item.get("admin1")) != target_prov:
+            return (-1, -1, -1)
+        item_name = str(item.get("name") or "")
+        item_name_lower = item_name.lower()
+        exact = int(item_name in (name, bare) or item_name_lower == pinyin)
+        contains = int(bool(bare) and (bare in item_name or item_name in bare))
+        # 只有名称确实对应时才接受候选；仅“同省 + 有 admin2”不足以证明地点正确。
+        if not exact and not contains:
+            return (-1, -1, -1)
+        has_admin2 = int(bool(item.get("admin2")))
+        return (exact, contains, has_admin2)
+
+    valid = [(rank(item), item) for item in results]
+    valid = [(score, item) for score, item in valid if score[0] >= 0]
+    return max(valid, key=lambda pair: pair[0])[1] if valid else None
 
 
 def _build_location(cand: dict, om: dict) -> Location:
@@ -272,7 +314,8 @@ def _build_location(cand: dict, om: dict) -> Location:
         longitude=om["longitude"],
         timezone=om.get("timezone") or "Asia/Shanghai",
         country="中国",
-        admin1=cand.get("province_cn") or om.get("admin1"),
-        admin2=om.get("admin2") or om.get("admin1"),
+        admin1=_norm_province(cand.get("province_cn") or om.get("admin1")),
+        admin2=om.get("admin2") or cand.get("name") or om.get("admin1"),
+        admin3=cand.get("name"),
         wcn_code=cand.get("code") or None,
     )

@@ -16,6 +16,9 @@ SAMPLE = {
         "precipitation": [0.0, 0.2, 0.0],
         "weather_code": [1, 2, 0],
         "cloud_cover": [30.0, 40.0, 10.0],
+        "cloud_cover_low": [20.0, 30.0, 5.0],
+        "cloud_cover_mid": [40.0, 50.0, 15.0],
+        "cloud_cover_high": [60.0, 70.0, 20.0],
         "wind_speed_10m": [3.1, 4.2, 2.0],
         "wind_gusts_10m": [7.0, 8.5, 4.0],
         "wind_direction_10m": [90.0, 135.0, 45.0],
@@ -50,6 +53,9 @@ def test_parse_forecast_hourly_fields():
     assert h0.temperature == 25.0
     assert h0.apparent_temperature == 27.0
     assert h0.cloud_cover == 30.0
+    assert h0.cloud_cover_low == 20.0
+    assert h0.cloud_cover_mid == 40.0
+    assert h0.cloud_cover_high == 60.0
     assert h0.wind_speed == 3.1
     assert h0.wind_gusts == 7.0
     assert h0.wind_direction == 90.0

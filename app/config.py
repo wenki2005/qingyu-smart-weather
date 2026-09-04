@@ -53,6 +53,10 @@ class Settings(BaseSettings):
 
     # ---------- 在线灾害预警（中央气象台，免费无需 Key） ----------
     nmc_alarm_url: str = "http://www.nmc.cn/rest/findAlarm"
+    warning_max_age_hours: float = 12.0  # 无有效截止时间的官方预警最大保留时长
+    glow_cache_minutes: float = 20.0     # 全国霞光地图缓存时长，避免切换地点重复拉取
+    weather_cache_seconds: float = 180.0 # 当前地点报告短缓存；灾害预警另行实时轮询
+    enhancement_timeout_seconds: float = 6.0  # 官方/天象增强源单源最大等待时间
 
     # ---------- 台风路径（中央气象台台风网，免费无需 Key） ----------
     typhoon_list_url: str = "http://typhoon.nmc.cn/weatherservice/typhoon/jsons/list_default"

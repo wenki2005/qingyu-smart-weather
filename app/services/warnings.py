@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
@@ -24,13 +25,36 @@ from .weather import WeatherClient
 logger = logging.getLogger(__name__)
 
 
+def _next_hours(
+    daily: list[DailyWeather], limit: int, now: Optional[datetime] = None
+) -> list:
+    """按城市本地当前时间取未来 limit 小时，规则预警不扫描整个预报周期。"""
+    hours = [hour for day in daily for hour in day.hours]
+    hours.sort(key=lambda hour: hour.time)
+    if now is not None:
+        end = now + timedelta(hours=limit)
+        return [hour for hour in hours if now <= hour.time < end]
+    return hours[:limit]
+
+
+def _local_now(timezone: str) -> datetime:
+    """返回目标城市时区的本地无时区时间，用于对齐 Open-Meteo 小时预报。"""
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(timezone)).replace(tzinfo=None)
+    except Exception:
+        return datetime.now()
+
+
 class RuleEngine:
     """基于预报数据的特殊天气规则引擎。"""
 
     def __init__(self, settings: Settings):
         self._s = settings
 
-    def detect(self, daily: list[DailyWeather]) -> list[WeatherWarning]:
+    def detect(
+        self, daily: list[DailyWeather], now: Optional[datetime] = None
+    ) -> list[WeatherWarning]:
         warnings: list[WeatherWarning] = []
         today = daily[0] if daily else None
         if today is None:
@@ -57,17 +81,17 @@ class RuleEngine:
                 source="rules",
             ))
 
-        # 大风 / 强风（扫描未来数日小时数据，按风速与阵风分级）
+        # 大风 / 强风：只看未来 24 小时，避免把第三天的风险当成当前预警。
         # 注意：普通大风不标注「台风」，只有检测到真实台风路径（见 WarningService.detect_typhoon）
         # 时才给出台风预警，避免把强对流/季风大风误报为台风。
         max_wind = 0.0
         max_gust = 0.0
-        for day in daily:
-            for h in day.hours:
-                if h.wind_speed is not None:
-                    max_wind = max(max_wind, h.wind_speed)
-                if h.wind_gusts is not None:
-                    max_gust = max(max_gust, h.wind_gusts)
+        forecast_hours = _next_hours(daily, 24, now)
+        for h in forecast_hours:
+            if h.wind_speed is not None:
+                max_wind = max(max_wind, h.wind_speed)
+            if h.wind_gusts is not None:
+                max_gust = max(max_gust, h.wind_gusts)
         if max_wind >= s.warn_wind_typhoon:
             warnings.append(WeatherWarning(
                 title=f"12 级以上狂风提醒：最大持续风速 {max_wind:.0f} m/s",
@@ -97,23 +121,22 @@ class RuleEngine:
                 source="rules",
             ))
 
-        # 强降雨 / 大雾 / 雷暴 / 冰雹 / 降雪（扫描未来数日小时数据）
+        # 强降雨 / 大雾 / 雷暴 / 冰雹 / 降雪：同样只看未来 24 小时。
         hit: dict[str, float] = {}
         max_hail_code = 0
-        for day in daily:
-            for h in day.hours:
-                if h.precipitation is not None and h.precipitation >= s.warn_precip_hourly:
-                    hit.setdefault("precip", 0.0)
-                    hit["precip"] = max(hit["precip"], h.precipitation)
-                if h.visibility is not None and h.visibility <= s.warn_visibility:
-                    hit.setdefault("fog", 0.0)
-                if h.weather_code == 95:
-                    hit.setdefault("thunder", 0.0)
-                if h.weather_code in (96, 99):
-                    hit.setdefault("hail", 0.0)
-                    max_hail_code = max(max_hail_code, h.weather_code)
-                if h.weather_code in (71, 73, 75, 77, 85, 86):
-                    hit.setdefault("snow", 0.0)
+        for h in forecast_hours:
+            if h.precipitation is not None and h.precipitation >= s.warn_precip_hourly:
+                hit.setdefault("precip", 0.0)
+                hit["precip"] = max(hit["precip"], h.precipitation)
+            if h.visibility is not None and h.visibility <= s.warn_visibility:
+                hit.setdefault("fog", 0.0)
+            if h.weather_code == 95:
+                hit.setdefault("thunder", 0.0)
+            if h.weather_code in (96, 99):
+                hit.setdefault("hail", 0.0)
+                max_hail_code = max(max_hail_code, h.weather_code)
+            if h.weather_code in (71, 73, 75, 77, 85, 86):
+                hit.setdefault("snow", 0.0)
 
         if "precip" in hit:
             warnings.append(WeatherWarning(
@@ -250,8 +273,10 @@ class WarningService:
         self._typhoon: Optional[NmcTyphoonClient] = None
         self._nmc: Optional[NmcAlarmProvider] = None
 
-    def detect_rules(self, daily: list[DailyWeather]) -> list[WeatherWarning]:
-        return self._rules.detect(daily)
+    def detect_rules(
+        self, daily: list[DailyWeather], now: Optional[datetime] = None
+    ) -> list[WeatherWarning]:
+        return self._rules.detect(daily, now=now)
 
     async def fetch_official(self, latitude: float, longitude: float) -> list[WeatherWarning]:
         if self._qweather is None:
@@ -290,12 +315,20 @@ class WarningService:
             ))
         return out
 
-    async def fetch_nmc(self, province: str, city: str) -> list[WeatherWarning]:
-        """联网获取中央气象台当前有效预警（免费，无需 Key）。"""
+    async def fetch_nmc(
+        self,
+        province: str,
+        city: str,
+        district: str = "",
+        max_age_hours: float = 12.0,
+    ) -> list[WeatherWarning]:
+        """联网获取与当前省/市/区县匹配、仍在时效内的官方预警。"""
         try:
             if self._nmc is None:
                 self._nmc = NmcAlarmProvider(self._s)
-            return await self._nmc.fetch(province, city)
+            return await self._nmc.fetch(
+                province, city, district, max_age_hours=max_age_hours
+            )
         except Exception as e:
             logger.warning("获取 NMC 预警失败: %s", e)
             return []

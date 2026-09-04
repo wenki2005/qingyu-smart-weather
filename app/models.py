@@ -18,6 +18,9 @@ class HourlyWeather:
     precipitation: Optional[float] = None
     weather_code: Optional[int] = None
     cloud_cover: Optional[float] = None
+    cloud_cover_low: Optional[float] = None
+    cloud_cover_mid: Optional[float] = None
+    cloud_cover_high: Optional[float] = None
     wind_speed: Optional[float] = None
     wind_gusts: Optional[float] = None   # 阵风（10 分钟最大风速）
     wind_direction: Optional[float] = None  # 风向（度，自正北顺时针）
@@ -48,7 +51,8 @@ class Location:
     country: Optional[str] = None
     admin1: Optional[str] = None          # 省级行政区（如：浙江、广东），用于预警过滤
     admin2: Optional[str] = None          # 地级市（如：杭州市），用于预警过滤
-    wcn_code: Optional[str] = None        # 中国天气网城市代码（如 101210304），用于官方天气/预警
+    admin3: Optional[str] = None          # 区县/县级市（如：鹤山市），用于精确预警过滤
+    wcn_code: Optional[str] = None        # 中国天气网城市代码（如 101210304），用于官方天气/预警过滤
 
 
 @dataclass

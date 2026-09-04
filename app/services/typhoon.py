@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import math
@@ -56,6 +57,21 @@ def _parse_jsonp(text: str) -> dict:
     if not m:
         raise ValueError("JSONP 解析失败")
     return json.loads(m.group(1))
+
+
+def impact_radius_km(category: str, wind_speed: float, max_range: float = 700.0) -> float:
+    """按台风强度给出影响半径，避免所有台风都按同一范围判定。"""
+    by_category = {
+        "TD": 180.0,
+        "TS": 280.0,
+        "STS": 380.0,
+        "TY": 500.0,
+        "STY": 620.0,
+        "SuperTY": 700.0,
+    }
+    category_radius = by_category.get(category, 260.0)
+    wind_radius = max(150.0, min(700.0, 120.0 + max(0.0, wind_speed) * 12.0))
+    return min(float(max_range), max(category_radius, min(wind_radius, category_radius + 120.0)))
 
 
 def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -166,31 +182,36 @@ class NmcTyphoonClient:
     async def impact(self, latitude: float, longitude: float) -> list[TyphoonImpact]:
         """评估所有活跃台风对指定坐标的影响。"""
         storms = await self.active_storms()
+        tracks = await asyncio.gather(
+            *(self._track_points(storm["sid"]) for storm in storms),
+            return_exceptions=True,
+        )
         out: list[TyphoonImpact] = []
-        for storm in storms:
-            pts = await self._track_points(storm["sid"])
-            if not pts:
+        for storm, points in zip(storms, tracks):
+            if isinstance(points, Exception) or not points:
                 continue
             best = None
-            for p in pts:
-                d = distance_km(latitude, longitude, p["lat"], p["lon"])
-                if best is None or d < best[0]:
-                    best = (d, p)
+            for point in points:
+                distance = distance_km(latitude, longitude, point["lat"], point["lon"])
+                if best is None or distance < best[0]:
+                    best = (distance, point)
             if best is None:
                 continue
-            d, p = best
-            cat_cn = CATEGORY_CN.get(p["category"], p["category"] or "热带气旋")
+            distance, point = best
+            category = point["category"]
+            category_cn = CATEGORY_CN.get(category, category or "热带气旋")
+            radius = impact_radius_km(category, point["wind"], self._s.typhoon_max_range_km)
             out.append(TyphoonImpact(
                 name_cn=storm["name_cn"] or storm["name_en"] or "无名台风",
                 name_en=storm["name_en"] or "",
                 number=storm["number"],
-                category=p["category"],
-                category_cn=cat_cn,
-                wind_speed=p["wind"],
-                min_distance_km=round(d, 1),
-                closest_hour=p["hour"],
-                closest_time=p["time"],
-                affected=d <= self._s.typhoon_max_range_km,
+                category=category,
+                category_cn=category_cn,
+                wind_speed=point["wind"],
+                min_distance_km=round(distance, 1),
+                closest_hour=point["hour"],
+                closest_time=point["time"],
+                affected=distance <= radius,
             ))
         out.sort(key=lambda t: t.min_distance_km)
         return out

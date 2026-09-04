@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta
 from typing import Optional
 
 import httpx
@@ -48,11 +49,14 @@ class NmcAlarmProvider:
         self,
         province: Optional[str] = None,
         city: Optional[str] = None,
+        district: Optional[str] = None,
         limit: int = 6,
+        max_age_hours: float = 12.0,
     ) -> list[WeatherWarning]:
         """拉取指定省/市的当前官方预警。
 
-        province：省级行政区（如 浙江）；city：地级市（如 杭州市），用于二次过滤。
+        province：省级行政区；city：地级市；district：区县/县级市。
+        max_age_hours：超过该时长且接口没有明确有效期的预警不展示。
         """
         # 无法确定省份时无法正确限定预警范围：宁可返回空，也不把全国/外省预警推给用户
         if not province:
@@ -61,12 +65,13 @@ class NmcAlarmProvider:
             client = await self._http()
             items: list[dict] = []
             page = 1
-            while page <= 6:  # 最多取 6 页（300 条），覆盖省内全部预警
+            page_size = 100
+            while page <= 3:  # 只取最新 300 条，避免异常数据拖慢切换
                 resp = await client.get(
                     self._s.nmc_alarm_url,
                     params={
                         "pageNo": page,
-                        "pageSize": 50,
+                        "pageSize": page_size,
                         "signaltype": "",
                         "signallevel": "",
                         "province": province,
@@ -77,19 +82,86 @@ class NmcAlarmProvider:
                 page_data = (data.get("data") or {}).get("page") or {}
                 items.extend(page_data.get("list") or [])
                 total = page_data.get("count") or 0
-                if page * 50 >= total or not page_data.get("list"):
+                if page * page_size >= total or not page_data.get("list"):
                     break
                 page += 1
-            warnings = [self._to_warning(it) for it in items]
-            # 只展示用户所在城市的预警（标题含地级市名，含下属区县），
-            # 无本市预警时返回空，避免把外市（如茂名）的预警误显示给本市用户。
-            if city:
-                warnings = [w for w in warnings if city in w.title]
-            warnings.sort(key=lambda w: LEVEL_ORDER.get(w.level, 0), reverse=True)
+            warnings = []
+            for item in items:
+                warning = self._to_warning(item)
+                if not self._is_fresh(item, warning.issued_at, max_age_hours):
+                    continue
+                if self._matches_region(item, warning.title, province, city, district):
+                    warnings.append(warning)
+            warnings.sort(
+                key=lambda w: (LEVEL_ORDER.get(w.level, 0), w.issued_at), reverse=True
+            )
             return warnings[:limit]
         except Exception as e:
             logger.warning("获取中央气象台预警失败: %s", e)
             return []
+
+    @staticmethod
+    def _clean_region(value: Optional[str]) -> str:
+        value = str(value or "").strip()
+        # 省级长后缀必须优先处理，否则“广西壮族自治区”会变成“广西壮族”。
+        for suffix in (
+            "壮族自治区", "回族自治区", "维吾尔自治区", "特别行政区",
+            "自治区", "省", "市", "县", "区",
+        ):
+            if value.endswith(suffix):
+                value = value[:-len(suffix)]
+                break
+        return value
+
+    @classmethod
+    def _matches_region(
+        cls,
+        item: dict,
+        title: str,
+        province: Optional[str],
+        city: Optional[str],
+        district: Optional[str],
+    ) -> bool:
+        """优先使用接口结构化行政区字段，标题仅作最后兜底。"""
+        haystack = " ".join(
+            str(item.get(key) or "")
+            for key in ("province", "city", "county", "district", "area", "title")
+        ) + " " + title
+        province_name = cls._clean_region(province)
+        city_name = cls._clean_region(city)
+        district_name = cls._clean_region(district)
+        if province_name and province_name not in haystack:
+            return False
+        # 区县级标题可能只有“鹤山市气象台”，也可能写成“江门市鹤山市”；
+        # 因此地级市与区县是 OR 关系，不能要求两者同时出现。
+        area_hits = [name for name in (city_name, district_name) if name]
+        if area_hits and not any(name in haystack for name in area_hits):
+            return False
+        return bool(province_name or area_hits)
+
+    @staticmethod
+    def _parse_issued(value: str) -> Optional[datetime]:
+        text = str(value or "").strip().replace("/", "-")
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(text, fmt)
+            except ValueError:
+                pass
+        return None
+
+    @classmethod
+    def _is_fresh(cls, item: dict, issued: str, max_age_hours: float) -> bool:
+        """过滤明显过期预警；无法解析时间时保留，避免误删官方数据。"""
+        now = datetime.now()
+        issued_dt = cls._parse_issued(issued)
+        if issued_dt is None or max_age_hours <= 0:
+            return True
+        # 接口若提供结束时间，以结束时间优先。
+        for key in ("endtime", "validtime", "expiretime", "valid_until"):
+            end_dt = cls._parse_issued(str(item.get(key) or ""))
+            if end_dt is not None:
+                return end_dt >= now
+        return now - issued_dt <= timedelta(hours=max_age_hours)
 
     @staticmethod
     def _to_warning(item: dict) -> WeatherWarning:

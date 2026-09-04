@@ -19,6 +19,8 @@ import logging
 import math
 import os
 import sys
+import threading
+import time
 import webbrowser
 from datetime import datetime
 from typing import Optional
@@ -114,6 +116,67 @@ def wind_dir_text(deg) -> str:
     return DIRS[int(((float(deg) + 22.5) % 360) // 45)]
 
 
+async def _empty_warnings():
+    return []
+
+
+def _dedupe_warnings(warnings):
+    seen = set()
+    out = []
+    for warning in warnings:
+        key = (warning.source, warning.title)
+        if key not in seen:
+            seen.add(key)
+            out.append(warning)
+    return out
+
+
+def _warning_to_ui(warning):
+    return {
+        "level": warning.level,
+        "title": warning.title,
+        "desc": warning.description or "",
+        "source": warning.source,
+        "issued_at": warning.issued_at or "",
+        "url": warning.url or "",
+    }
+
+
+class _AsyncRunner:
+    """在后台复用一个事件循环，避免 pywebview 每次调用都 asyncio.run。"""
+
+    def __init__(self):
+        self._ready = threading.Event()
+        self._loop = None
+        self._thread = threading.Thread(target=self._run, daemon=True, name="weather-async")
+        self._thread.start()
+        self._ready.wait(timeout=5)
+        if self._loop is None:
+            raise RuntimeError("天气异步运行时启动失败")
+
+    def _run(self):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        self._loop = loop
+        self._ready.set()
+        loop.run_forever()
+        loop.close()
+
+    def run(self, coro):
+        future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        try:
+            return future.result(timeout=90)
+        except Exception:
+            future.cancel()
+            raise
+
+    def close(self):
+        if self._loop is not None and self._loop.is_running():
+            self._loop.call_soon_threadsafe(self._loop.stop)
+            self._thread.join(timeout=2)
+            self._loop = None
+
+
 class DesktopAPI:
     """暴露给前端的 Python 数据桥（js_api）。"""
 
@@ -123,6 +186,9 @@ class DesktopAPI:
         self._fahrenheit = False
         self._runtime: dict = self._load_runtime_settings()
         self._history: list[str] = self._load_history()
+        self._last_report: Optional[WeatherReport] = None
+        self._report_cache: dict[tuple, tuple[float, WeatherReport]] = {}
+        self._async_runner = _AsyncRunner()
 
     # ---------------------------------------------------------- 历史
     def _hist_path(self) -> str:
@@ -195,6 +261,18 @@ class DesktopAPI:
     # ---------------------------------------------------------- 数据
     async def _fetch(self, loc: Location) -> Optional[dict]:
         models = self._runtime.get("open_meteo_models") or None
+        cache_key = (
+            round(loc.latitude, 4), round(loc.longitude, 4),
+            bool(self._fahrenheit), models or "default",
+            bool(self._runtime.get("show_official", True)),
+            bool(self._runtime.get("nmc_warnings", True)),
+            bool(self._runtime.get("typhoon_warnings", True)),
+        )
+        cached = self._report_cache.get(cache_key)
+        ttl = max(0.0, float(getattr(self._settings, "weather_cache_seconds", 180.0)))
+        if cached and time.monotonic() - cached[0] < ttl:
+            self._last_report = cached[1]
+            return self._to_ui_dict(cached[1], loc)
         weather = WeatherClient(self._settings, models=models)
         warnings_svc = WarningService(self._settings, weather)
         try:
@@ -203,7 +281,7 @@ class DesktopAPI:
                 weather, warnings_svc, rec_engine, self._settings,
                 override_location=loc,
                 fahrenheit=self._fahrenheit,
-                include_glow=True,
+                include_glow=False,
                 nmc_enabled=self._runtime.get("nmc_warnings", True),
                 typhoon_enabled=self._runtime.get("typhoon_warnings", True),
                 official_enabled=self._runtime.get("show_official", True),
@@ -211,6 +289,8 @@ class DesktopAPI:
             )
             if report is None:
                 return None
+            self._last_report = report
+            self._report_cache[cache_key] = (time.monotonic(), report)
             return self._to_ui_dict(report, loc)
         finally:
             await warnings_svc.aclose()
@@ -373,11 +453,63 @@ class DesktopAPI:
         from app.services.news import build_news_bulletin
         return build_news_bulletin(r)
 
+    def get_glow_map(self) -> list[dict]:
+        """单独获取全国霞光地图；前端在首屏渲染后调用，不阻塞地点切换。"""
+        return self._sync(self._get_glow_map())
+
+    async def _get_glow_map(self) -> list[dict]:
+        from app.services.glow_map import GlowMapService
+
+        models = self._runtime.get("open_meteo_models") or None
+        glow = GlowMapService(self._settings, models=models)
+        try:
+            items = await glow.compute()
+            return [
+                {"name": g.name, "lat": g.latitude, "lon": g.longitude,
+                 "sunset": g.sunset_probability, "sunset_level": g.sunset_level,
+                 "sunset_time": g.sunset_time or "", "sunrise": g.sunrise_score,
+                 "sunrise_level": g.sunrise_level, "sunrise_time": g.sunrise_time or ""}
+                for g in items
+            ]
+        finally:
+            await glow.aclose()
+
+    def refresh_warnings(self) -> list[dict]:
+        """仅刷新实时灾害预警，供前端定时轮询，不重拉全国霞光地图。"""
+        return self._sync(self._refresh_warnings())
+
+    async def _refresh_warnings(self) -> list[dict]:
+        if self._location is None:
+            return []
+        loc = self._location
+        weather = WeatherClient(self._settings, models=self._runtime.get("open_meteo_models") or None)
+        svc = WarningService(self._settings, weather)
+        try:
+            rules = []
+            if self._last_report:
+                rules = svc.detect_rules(self._last_report.daily, now=local_now(loc))
+            import asyncio
+            tasks = [
+                svc.fetch_official(loc.latitude, loc.longitude),
+                svc.fetch_nmc(
+                    loc.admin1 or "", loc.admin2 or "", loc.admin3 or "",
+                    max_age_hours=self._settings.warning_max_age_hours,
+                ) if self._runtime.get("nmc_warnings", True) else _empty_warnings(),
+                svc.detect_typhoon(loc.latitude, loc.longitude)
+                if self._runtime.get("typhoon_warnings", True) else _empty_warnings(),
+            ]
+            qweather, nmc, typhoon = await asyncio.gather(*tasks)
+            warnings = _dedupe_warnings([*rules, *qweather, *nmc, *typhoon])
+            return [_warning_to_ui(w) for w in warnings]
+        finally:
+            await svc.aclose()
+            await weather.aclose()
+
     # ---------------------------------------------------------- js_api
     # 注意：pywebview 的 js_api 调用是同步的（不支持 async 方法），
     # 故此处对外提供同步包装，内部转 async 执行。
     def _sync(self, coro):
-        return asyncio.run(coro)
+        return self._async_runner.run(coro)
 
     def locate(self) -> dict:
         """IP 定位当前城市并返回全部数据。"""
@@ -434,7 +566,14 @@ class DesktopAPI:
     async def _refresh(self) -> dict:
         if self._location is None:
             return await self._locate()
+        self._invalidate_report_cache(self._location)
         return await self._fetch(self._location)
+
+    def _invalidate_report_cache(self, loc: Location) -> None:
+        prefix = (round(loc.latitude, 4), round(loc.longitude, 4))
+        for key in list(self._report_cache):
+            if key[:2] == prefix:
+                self._report_cache.pop(key, None)
 
     def toggle_unit(self) -> dict:
         return self._sync(self._toggle_unit())
@@ -447,6 +586,10 @@ class DesktopAPI:
 
     def get_state(self) -> dict:
         return {"history": self._history}
+
+    def close(self):
+        """关闭桌面 API 的后台异步运行时。"""
+        self._async_runner.close()
 
     def open_url(self, url: str) -> dict:
         """在系统默认浏览器中打开外部链接（用于预警详情页跳转）。"""
@@ -513,7 +656,7 @@ async def cli_run(city: Optional[str]) -> int:
         print(f"趋势：{trend_txt}")
         return 0
     finally:
-        pass
+        api.close()
 
 
 def main() -> int:
@@ -547,6 +690,7 @@ def main() -> int:
             min_size=(1000, 720),
         )
         webview.start()
+        api.close()
         return 0
     except ImportError:
         print("=" * 52)

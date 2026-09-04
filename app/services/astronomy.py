@@ -20,6 +20,7 @@ import json
 import logging
 import math
 import re
+import time
 from dataclasses import dataclass
 from datetime import date
 from typing import Optional
@@ -239,6 +240,10 @@ NOAA_KP_URLS = (
     "https://services.swpc.noaa.gov/json/planetary-k-index-forecast.json",
 )
 KYOTO_KP_URL = "http://wdc.kugi.kyoto-u.ac.jp/cgi-bin/kp-cgi"
+_KP_FORECAST_CACHE: Optional[tuple[float, tuple[float, str]]] = None
+_KP_NOW_CACHE: Optional[tuple[float, float]] = None
+_KP_FORECAST_TTL = 900.0
+_KP_NOW_TTL = 1800.0
 
 # 极光展示阈值：Kp 达到该值即为强地磁暴，即使本地纬度不可见也值得提醒
 AURORA_STORM_KP = 6.0
@@ -484,6 +489,10 @@ class AstronomyService:
 
     async def fetch_kp_forecast(self) -> Optional[tuple[float, str]]:
         """NOAA SWPC 3 天 Kp 预报：返回 (最大 Kp, 时间)。"""
+        global _KP_FORECAST_CACHE
+        now = time.monotonic()
+        if _KP_FORECAST_CACHE and now - _KP_FORECAST_CACHE[0] < _KP_FORECAST_TTL:
+            return _KP_FORECAST_CACHE[1]
         client = await self._http()
         for url in NOAA_KP_URLS:
             try:
@@ -492,6 +501,7 @@ class AstronomyService:
                     continue
                 parsed = _parse_noaa_kp(resp.text)
                 if parsed is not None:
+                    _KP_FORECAST_CACHE = (time.monotonic(), parsed)
                     return parsed
             except Exception as e:
                 logger.warning("NOAA Kp 预报拉取失败: %s", e)
@@ -499,6 +509,10 @@ class AstronomyService:
 
     async def fetch_kp_now(self) -> Optional[float]:
         """京都 WDC 实测 Kp：返回最近 3 日峰值。"""
+        global _KP_NOW_CACHE
+        now = time.monotonic()
+        if _KP_NOW_CACHE and now - _KP_NOW_CACHE[0] < _KP_NOW_TTL:
+            return _KP_NOW_CACHE[1]
         client = await self._http()
         try:
             today = date.today()
@@ -514,7 +528,10 @@ class AstronomyService:
             )
             if resp.status_code != 200:
                 return None
-            return _parse_kyoto_kp(resp.text)
+            parsed = _parse_kyoto_kp(resp.text)
+            if parsed is not None:
+                _KP_NOW_CACHE = (time.monotonic(), parsed)
+            return parsed
         except Exception as e:
             logger.warning("京都 WDC Kp 拉取失败: %s", e)
             return None

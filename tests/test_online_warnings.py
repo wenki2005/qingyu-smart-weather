@@ -78,7 +78,7 @@ async def test_nmc_alarm_fetch_filters_by_city(settings):
     }
     respx.get(settings.nmc_alarm_url).mock(return_value=httpx.Response(200, json=payload))
     provider = NmcAlarmProvider(settings)
-    warns = await provider.fetch("浙江", "杭州市")
+    warns = await provider.fetch("浙江", "杭州市", max_age_hours=0)
     assert len(warns) == 2
     assert warns[0].level == "红色"          # 暴雨红 > 台风橙
     assert warns[0].source == "nmc"
@@ -100,7 +100,7 @@ async def test_nmc_alarm_no_city_hits_returns_empty(settings):
     }
     respx.get(settings.nmc_alarm_url).mock(return_value=httpx.Response(200, json=payload))
     provider = NmcAlarmProvider(settings)
-    warns = await provider.fetch("广东", "深圳市")
+    warns = await provider.fetch("广东", "深圳市", max_age_hours=0)
     assert warns == []          # 外市预警不展示
     await provider.aclose()
 
@@ -112,3 +112,43 @@ async def test_nmc_alarm_requires_province(settings):
     warns = await provider.fetch("", "")
     assert warns == []
     await provider.aclose()
+
+
+@pytest.mark.asyncio
+@respx.mock
+async def test_nmc_alarm_matches_county_when_city_name_missing(settings):
+    """区县预警标题只写区县名时，也不能漏掉当前地点。"""
+    payload = {
+        "data": {"page": {"pageNo": 1, "pageSize": 100, "count": 1, "list": [
+            {"alertid": "1", "issuetime": "2026/09/04 10:00",
+             "title": "广东省鹤山市气象台发布暴雨黄色预警信号"},
+        ]}},
+    }
+    respx.get(settings.nmc_alarm_url).mock(return_value=httpx.Response(200, json=payload))
+    provider = NmcAlarmProvider(settings)
+    warns = await provider.fetch("广东", "江门市", "鹤山市", max_age_hours=0)
+    assert len(warns) == 1
+    await provider.aclose()
+
+
+def test_nmc_region_suffix_normalization():
+    assert NmcAlarmProvider._clean_region("广西壮族自治区") == "广西"
+    assert NmcAlarmProvider._clean_region("香港特别行政区") == "香港"
+    assert NmcAlarmProvider._clean_region("江门市") == "江门"
+
+
+def test_nmc_freshness_filter():
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    old = "2020-01-01 00:00"
+    assert NmcAlarmProvider._is_fresh({}, now, 12)
+    assert not NmcAlarmProvider._is_fresh({}, old, 12)
+    assert NmcAlarmProvider._is_fresh({}, old, 0)
+
+
+
+def test_typhoon_radius_depends_on_strength():
+    from app.services.typhoon import impact_radius_km
+    assert impact_radius_km("TD", 15.0) < impact_radius_km("TY", 35.0)
+    assert impact_radius_km("TD", 15.0) <= 300
+    assert impact_radius_km("SuperTY", 50.0) <= 700

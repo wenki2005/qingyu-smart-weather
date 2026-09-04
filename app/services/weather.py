@@ -15,7 +15,7 @@ import httpx
 from ..config import Settings
 from ..constants import WMO_WEATHER_CODE
 from ..models import AirQuality, DailyWeather, HourlyWeather, Location
-from .cn_geocoder import _is_cjk, geocode_cn
+from .cn_geocoder import _is_cjk, _norm_province, geocode_cn
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,9 @@ HOURLY_FIELDS = [
     "precipitation",
     "weather_code",
     "cloud_cover",
+    "cloud_cover_low",
+    "cloud_cover_mid",
+    "cloud_cover_high",
     "wind_speed_10m",
     "wind_gusts_10m",
     "wind_direction_10m",
@@ -105,14 +108,17 @@ class WeatherClient:
         if not results:
             return None
         r = results[0]
+        name = r.get("name") or city
+        country_code = (r.get("country_code") or "").upper()
         return Location(
-            name=r.get("name") or city,
+            name=name,
             latitude=r["latitude"],
             longitude=r["longitude"],
             timezone=r.get("timezone") or self._settings.timezone,
             country=r.get("country"),
-            admin1=r.get("admin1"),
-            admin2=r.get("admin2"),
+            admin1=_norm_province(r.get("admin1")) if country_code == "CN" else r.get("admin1"),
+            admin2=r.get("admin2") or name,
+            admin3=name if country_code == "CN" else None,
         )
 
     async def resolve_location(self) -> Optional[Location]:
@@ -169,8 +175,8 @@ class WeatherClient:
             "latitude": location.latitude,
             "longitude": location.longitude,
             "hourly": (
-                "weather_code,cloud_cover,precipitation_probability,precipitation,"
-                "visibility,relative_humidity_2m"
+                "weather_code,cloud_cover,cloud_cover_low,cloud_cover_mid,cloud_cover_high,"
+                "precipitation_probability,precipitation,visibility,relative_humidity_2m"
             ),
             "daily": "sunrise,sunset",
             "timezone": location.timezone,
@@ -207,12 +213,25 @@ class WeatherClient:
             times = hourly.get("time", [])
 
             def latest(key: str) -> Optional[float]:
-                """取最近一个非空时刻的数值。"""
+                """取最接近当前时刻的非空值，而不是取预报末尾值。"""
                 vals = hourly.get(key) or []
-                for i in range(len(times) - 1, -1, -1):
-                    if i < len(vals) and vals[i] is not None:
-                        return float(vals[i])
-                return None
+                if not times:
+                    return None
+                try:
+                    from zoneinfo import ZoneInfo
+                    now = datetime.now(ZoneInfo(location.timezone)).replace(tzinfo=None)
+                except Exception:
+                    now = datetime.now()
+                ranked = []
+                for i, time_text in enumerate(times):
+                    if i >= len(vals) or vals[i] is None:
+                        continue
+                    try:
+                        point = datetime.fromisoformat(str(time_text))
+                    except ValueError:
+                        continue
+                    ranked.append((abs((point - now).total_seconds()), float(vals[i])))
+                return min(ranked, key=lambda item: item[0])[1] if ranked else None
 
             aqi = latest("us_aqi")
             if aqi is None:
@@ -264,6 +283,9 @@ class WeatherClient:
                     precipitation=_val(hourly.get("precipitation"), idx),
                     weather_code=_int_val(hourly.get("weather_code"), idx),
                     cloud_cover=_val(hourly.get("cloud_cover"), idx),
+                    cloud_cover_low=_val(hourly.get("cloud_cover_low"), idx),
+                    cloud_cover_mid=_val(hourly.get("cloud_cover_mid"), idx),
+                    cloud_cover_high=_val(hourly.get("cloud_cover_high"), idx),
                     wind_speed=_val(hourly.get("wind_speed_10m"), idx),
                     wind_gusts=_val(hourly.get("wind_gusts_10m"), idx),
                     wind_direction=_val(hourly.get("wind_direction_10m"), idx),

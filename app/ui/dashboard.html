@@ -600,18 +600,14 @@ function render(d){
   });
   drawSunMap(d); drawTrend(d); renderAir(d);
   lastData = d; drawGlowMap(d, glowMetric);
+  // 全国霞光图是独立缓存数据，不再阻塞城市天气首屏。
+  if(api && api.get_glow_map){
+    api.get_glow_map().then(list=>{
+      if(lastData && Array.isArray(list)){ lastData.glow_map=list; drawGlowMap(lastData, glowMetric); }
+    }).catch(()=>{});
+  }
   // 预警
-  const srcMap = {"rules":"规则引擎","typhoon":"台风路径","nmc":"中央气象台","qweather":"和风天气"};
-  const escUrl = u => (u||"").replace(/&/g,"&amp;").replace(/"/g,"&quot;");
-  $("warnList").innerHTML = d.warnings.length ? d.warnings.map((w,i)=>{
-    const c = {"红色":"#ff4d5e","橙色":"#ff8a3d","黄色":"#ffd166","蓝色":"#7fd4ff"}[w.level]||"#7fd4ff";
-    const clickable = w.url ? " clickable" : "";
-    const hint = w.url ? ` · <b style="color:var(--ice)">↗ 点击查看详情</b>` : "";
-    return `<div class="warn${clickable}" data-url="${escUrl(w.url)}" style="animation-delay:${i*.07}s">
-      <span class="lv" style="color:${c}">${w.level}</span>
-      <div class="tx"><b style="color:${c}">${w.title}</b><p>${w.desc||""}</p>
-      ${w.source?`<span class="w-src">来源：${srcMap[w.source]||w.source}${w.issued_at?` · ${w.issued_at}`:""}${hint}</span>`:""}</div></div>`;
-  }).join("") : `<div class="empty">✓ 当前无特殊天气与预警，天空平静。</div>`;
+  renderWarnings(d.warnings||[]);
   // 推荐
   $("recList").innerHTML = d.recommendations.map((r,i)=>
     `<div class="rec" style="animation-delay:${i*.06}s"><span class="ic">${r.icon}</span>
@@ -626,6 +622,20 @@ function render(d){
   // 历史 + 任务
   renderHist(d.history||[]);
   $("status").textContent = "已更新 · " + (d.unit==="f"?"°F":"°C");
+}
+
+function renderWarnings(list){
+  const srcMap = {"rules":"规则引擎","typhoon":"台风路径","nmc":"中央气象台","qweather":"和风天气"};
+  const esc = s => String(s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+  $("warnList").innerHTML = list.length ? list.map((w,i)=>{
+    const c = {"红色":"#ff4d5e","橙色":"#ff8a3d","黄色":"#ffd166","蓝色":"#7fd4ff"}[w.level]||"#7fd4ff";
+    const clickable = w.url ? " clickable" : "";
+    const hint = w.url ? ` · <b style="color:var(--ice)">↗ 点击查看详情</b>` : "";
+    return `<div class="warn${clickable}" data-url="${esc(w.url)}" style="animation-delay:${i*.07}s">
+      <span class="lv" style="color:${c}">${esc(w.level)}</span>
+      <div class="tx"><b style="color:${c}">${esc(w.title)}</b><p>${esc(w.desc)}</p>
+      ${w.source?`<span class="w-src">来源：${esc(srcMap[w.source]||w.source)}${w.issued_at?` · ${esc(w.issued_at)}`:""}${hint}</span>`:""}</div></div>`;
+  }).join("") : `<div class="empty">✓ 当前无特殊天气与预警，天空平静。</div>`;
 }
 
 function renderMoon(m){
@@ -896,11 +906,11 @@ setInterval(tick,1000);tick();
 
 /* pywebview 6.x 的 js_api 在 JS 端返回 Promise，必须 .then()/await 取值；
    Python 侧方法为同步实现。 */
-$("btnLocate").onclick=()=>{loading(true);api.locate().then(render).catch(err).finally(()=>loading(false));};
+$("btnLocate").onclick=()=>{loading(true);api.locate().then(d=>{render(d);startWarningPolling();}).catch(err).finally(()=>loading(false));};
 $("btnSearch").onclick=()=>doSearch($("cityInput").value.trim());
 $("cityInput").addEventListener("keydown",e=>{if(e.key==="Enter")doSearch($("cityInput").value.trim());});
-$("btnUnit").onclick=()=>{loading(true);api.toggle_unit().then(d=>{$("btnUnit").textContent=d.unit==="f"?"°C":"°F";render(d);}).catch(err).finally(()=>loading(false));};
-$("btnRefresh").onclick=()=>{loading(true);api.refresh().then(render).catch(err).finally(()=>loading(false));};
+$("btnUnit").onclick=()=>{loading(true);api.toggle_unit().then(d=>{$("btnUnit").textContent=d.unit==="f"?"°C":"°F";render(d);startWarningPolling();}).catch(err).finally(()=>loading(false));};
+$("btnRefresh").onclick=()=>{loading(true);api.refresh().then(d=>{render(d);startWarningPolling();}).catch(err).finally(()=>loading(false));};
 function openSettings(){
   const s = runtimeSettings;
   $("setModel").value = s.open_meteo_models || "";
@@ -949,7 +959,23 @@ $("glowMetricSunrise").onclick=()=>{glowMetric="sunrise";
   $("glowMetricSunrise").classList.add("active");$("glowMetricSunset").classList.remove("active");
   if(lastData) drawGlowMap(lastData, glowMetric);};
 
-function doSearch(city){if(!city)return;loading(true);api.search(city).then(render).catch(err).finally(()=>loading(false));}
+let warningPollTimer = null;
+function startWarningPolling(){
+  if(warningPollTimer) clearInterval(warningPollTimer);
+  warningPollTimer = setInterval(()=>{
+    if(api && api.refresh_warnings){
+      api.refresh_warnings().then(list=>{
+        if(lastData && Array.isArray(list)){ lastData.warnings=list; renderWarnings(list); }
+      }).catch(()=>{});
+    }
+  }, 10*60*1000);
+}
+
+function doSearch(city){
+  if(!city)return;
+  loading(true);
+  api.search(city).then(d=>{ render(d); startWarningPolling(); }).catch(err).finally(()=>loading(false));
+}
 function speakNews(){
   const txt=$("newsText").textContent;
   if(!txt) return toast("暂无新闻内容");
@@ -996,7 +1022,7 @@ function boot(){
     const q=new URLSearchParams(location.search);
     const c=q.get("city");
     const first = c ? api.search(c) : api.locate();
-    first.then(render).catch(err).finally(()=>loading(false));
+    first.then(d=>{ render(d); startWarningPolling(); }).catch(err).finally(()=>loading(false));
 
   } else {
     if(++boot._t > 90){  // 约 9 秒超时

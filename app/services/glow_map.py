@@ -7,7 +7,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+import time
+from typing import ClassVar, Optional
 
 from ..config import Settings
 from ..models import GlowCity, Location
@@ -62,23 +63,41 @@ CITIES: list[tuple[str, float, float]] = [
 class GlowMapService:
     """霞光地图服务：批量计算全国主要城市朝霞/晚霞指数。"""
 
+    _cache: ClassVar[dict[str, tuple[float, list[GlowCity]]]] = {}
+    _locks: ClassVar[dict[str, asyncio.Lock]] = {}
+
     def __init__(self, settings: Settings, models: Optional[str] = None):
         self._settings = settings
         self._weather = WeatherClient(settings, models=models)
         self._rec = RecommendationEngine()
 
     async def compute(self) -> list[GlowCity]:
-        locs = [
-            Location(name=name, latitude=lat, longitude=lon, timezone="Asia/Shanghai")
-            for name, lat, lon in CITIES
-        ]
-        results = await asyncio.gather(
-            *[self._one(loc) for loc in locs],
-            return_exceptions=True,
-        )
-        out: list[GlowCity] = [r for r in results if isinstance(r, GlowCity)]
-        out.sort(key=lambda c: c.sunset_probability, reverse=True)
-        return out
+        model_key = self._weather._models or self._settings.open_meteo_models or "default"
+        ttl = max(60.0, float(self._settings.glow_cache_minutes) * 60.0)
+        cached = self._cache.get(model_key)
+        if cached and time.monotonic() - cached[0] < ttl:
+            return list(cached[1])
+        lock = self._locks.setdefault(model_key, asyncio.Lock())
+        async with lock:
+            cached = self._cache.get(model_key)
+            if cached and time.monotonic() - cached[0] < ttl:
+                return list(cached[1])
+            locs = [
+                Location(name=name, latitude=lat, longitude=lon, timezone="Asia/Shanghai")
+                for name, lat, lon in CITIES
+            ]
+            # 免费接口需要限流：37 个请求分批执行，避免 429。
+            sem = asyncio.Semaphore(6)
+
+            async def limited(loc):
+                async with sem:
+                    return await self._one(loc)
+
+            results = await asyncio.gather(*[limited(loc) for loc in locs], return_exceptions=True)
+            out = [r for r in results if isinstance(r, GlowCity)]
+            out.sort(key=lambda c: c.sunset_probability, reverse=True)
+            self._cache[model_key] = (time.monotonic(), out)
+            return list(out)
 
     async def _one(self, loc: Location) -> Optional[GlowCity]:
         try:
