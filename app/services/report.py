@@ -120,7 +120,8 @@ async def build_report(
 
     # 晚霞使用空气质量作为天空通透度修正。
     report.sunset = compute_sunset_probability(
-        today, today.sunset, today.hours, air_quality=report.air_quality
+        today, today.sunset, today.hours, air_quality=report.air_quality,
+        latitude=location.latitude,
     )
     extra_hours = daily[1].hours if len(daily) > 1 else None
     report.moon = compute_moon_viewing(today, extra_hours=extra_hours)
@@ -135,9 +136,11 @@ async def build_report(
     report.warnings.extend(nmc_warnings)
     report.warnings.extend(qweather_warnings)
 
-    groups = [rec_engine.recommend(today, day_label="今天")]
+    groups = [rec_engine.recommend(
+        today, day_label="今天", air_quality=report.air_quality, latitude=location.latitude
+    )]
     if len(daily) > 1:
-        groups.append(rec_engine.recommend(daily[1], day_label="明天"))
+        groups.append(rec_engine.recommend(daily[1], day_label="明天", latitude=location.latitude))
     report.recommendations = merge_recommendations(groups)
 
     next_day = daily[1] if len(daily) > 1 else None

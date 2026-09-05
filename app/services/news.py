@@ -57,6 +57,13 @@ def build_news_bulletin(report: WeatherReport) -> str:
             f"傍晚时分，{city}晚霞观赏概率为{s.probability:.0f}%，{s.level}概率，"
             + (f"日落时间约在{_fmt(s.sunset_time)}。" if s.sunset_time else "请留意西边天空。")
         )
+        if s.golden_evening or s.blue_evening:
+            windows = []
+            if s.golden_evening:
+                windows.append(f"金色时刻{s.golden_evening}")
+            if s.blue_evening:
+                windows.append(f"蓝调时刻{s.blue_evening}")
+            lines.append("摄影时段方面：" + "，".join(windows) + "。")
 
     if report.moon and report.moon.illuminated >= 8:
         m = report.moon

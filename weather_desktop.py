@@ -368,6 +368,10 @@ class DesktopAPI:
             "sunset_time": (s.sunset_time[-5:] if s and s.sunset_time else "--:--"),
             "cloud_cover": s.cloud_cover_at_sunset if s else None,
             "tips": s.tips if s else "",
+            "golden_morning": s.golden_morning if s else None,
+            "golden_evening": s.golden_evening if s else None,
+            "blue_morning": s.blue_morning if s else None,
+            "blue_evening": s.blue_evening if s else None,
         }
 
         moon = None

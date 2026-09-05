@@ -6,15 +6,15 @@
 再叠加降水概率、能见度、湿度等修正因子。
 
 评分维度（满分 100）：
-- 云量得分（核心，权重 0.45）：落日前 1h 至日落后 30min 窗口内，云量越接近 35% 越高
-- 降水抑制（权重 0.35）：窗口内降水概率 / 降水量为 0 最佳
-- 能见度（权重 0.10）：能见度 >= 15km 最佳（通透）
-- 湿度（权重 0.10）：中低湿度更有助于色彩饱和度
+- 中高云结构（权重 0.40）：日落窗口内中云/高云更利于反射，低云过多会遮挡地平线
+- 降水条件（权重 0.25）：窗口内降水概率/降水量越低越好
+- 能见度（权重 0.15）：能见度 >= 15km 最佳
+- 湿度（权重 0.10）与 PM2.5 通透度（权重 0.10）
 """
 from __future__ import annotations
 
 import math
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from ..models import AirQuality, DailyWeather, HourlyWeather, SunsetInfo
@@ -30,6 +30,12 @@ CLOUD_HARD_LIMIT = 70.0
 # 观赏等级阈值
 LEVEL_HIGH = 75
 LEVEL_MEDIUM = 50
+
+# 摄影常用太阳高度角定义：金色时刻 -4°~+6°，蓝调时刻 -6°~-4°。
+GOLDEN_START_DEG = -4.0
+GOLDEN_END_DEG = 6.0
+BLUE_START_DEG = -6.0
+BLUE_END_DEG = -4.0
 
 
 def cloud_score(cloud_cover: Optional[float]) -> float:
@@ -107,11 +113,84 @@ def humidity_score(humidity: Optional[float]) -> float:
     return max(40.0, 100.0 - (humidity - 65.0) * 1.2)
 
 
+def twilight_times(
+    sunrise_str: Optional[str],
+    sunset_str: Optional[str],
+    latitude: Optional[float] = None,
+) -> dict[str, Optional[str]]:
+    """计算当地金色/蓝调时刻，返回四个“HH:MM-HH:MM”区间。
+
+    采用 NOAA 常用太阳高度角公式，以接口提供的日出/日落校准当地太阳时，
+    不依赖额外 API。纬度缺失时用日出/日落前后经验区间兜底。
+    """
+    if not sunrise_str or not sunset_str:
+        return {key: None for key in ("golden_morning", "golden_evening", "blue_morning", "blue_evening")}
+    try:
+        sunrise = datetime.fromisoformat(sunrise_str)
+        sunset = datetime.fromisoformat(sunset_str)
+    except ValueError:
+        return {key: None for key in ("golden_morning", "golden_evening", "blue_morning", "blue_evening")}
+    if latitude is None:
+        return {
+            "golden_morning": _range(sunrise - timedelta(minutes=30), sunrise + timedelta(minutes=30)),
+            "golden_evening": _range(sunset - timedelta(minutes=30), sunset + timedelta(minutes=30)),
+            "blue_morning": _range(sunrise - timedelta(minutes=45), sunrise - timedelta(minutes=30)),
+            "blue_evening": _range(sunset + timedelta(minutes=30), sunset + timedelta(minutes=45)),
+        }
+    try:
+        day_of_year = sunrise.timetuple().tm_yday
+        decl = math.radians(23.44 * math.sin(math.radians(360.0 * (284 + day_of_year) / 365.0)))
+        lat = math.radians(float(latitude))
+        cos_lat_dec = math.cos(lat) * math.cos(decl)
+        if abs(cos_lat_dec) < 1e-8:
+            raise ValueError("极地太阳几何不可用")
+        solar_noon = sunrise + (sunset - sunrise) / 2
+
+        def crossing(angle: float, morning: bool) -> datetime:
+            altitude = math.radians(angle)
+            value = (math.sin(altitude) - math.sin(lat) * math.sin(decl)) / cos_lat_dec
+            if not -1.0 <= value <= 1.0:
+                raise ValueError("太阳高度角无交点")
+            hour_angle = math.degrees(math.acos(value)) / 15.0
+            return solar_noon + timedelta(hours=-hour_angle if morning else hour_angle)
+
+        # 理论太阳高度角先计算，再用数据源的日出/日落作为锚点校准，
+        # 避免太阳视半径和地平线折射定义差异造成整体偏移。
+        reference = -0.833
+        raw_morning_ref = crossing(reference, True)
+        raw_evening_ref = crossing(reference, False)
+
+        def calibrate(raw: datetime, ref: datetime, anchor: datetime) -> datetime:
+            return anchor + (raw - ref)
+
+        gm_start = calibrate(crossing(GOLDEN_START_DEG, True), raw_morning_ref, sunrise)
+        gm_end = calibrate(crossing(GOLDEN_END_DEG, True), raw_morning_ref, sunrise)
+        ge_start = calibrate(crossing(GOLDEN_END_DEG, False), raw_evening_ref, sunset)
+        ge_end = calibrate(crossing(GOLDEN_START_DEG, False), raw_evening_ref, sunset)
+        bm_start = calibrate(crossing(BLUE_START_DEG, True), raw_morning_ref, sunrise)
+        bm_end = calibrate(crossing(BLUE_END_DEG, True), raw_morning_ref, sunrise)
+        be_start = calibrate(crossing(BLUE_END_DEG, False), raw_evening_ref, sunset)
+        be_end = calibrate(crossing(BLUE_START_DEG, False), raw_evening_ref, sunset)
+        return {
+            "golden_morning": _range(gm_start, gm_end),
+            "golden_evening": _range(ge_start, ge_end),
+            "blue_morning": _range(bm_start, bm_end),
+            "blue_evening": _range(be_start, be_end),
+        }
+    except (TypeError, ValueError, OverflowError):
+        return {key: None for key in ("golden_morning", "golden_evening", "blue_morning", "blue_evening")}
+
+
+def _range(start: datetime, end: datetime) -> str:
+    return f"{start:%H:%M}-{end:%H:%M}"
+
+
 def compute_sunset_probability(
     daily: DailyWeather,
     sunset_str: Optional[str],
     hours: list[HourlyWeather],
     air_quality: Optional[AirQuality] = None,
+    latitude: Optional[float] = None,
 ) -> SunsetInfo:
     """计算某一天晚霞观赏概率。"""
     if not sunset_str:
@@ -164,6 +243,7 @@ def compute_sunset_probability(
 
     level = _level(score)
     tips = _tips(level, sunset_str)
+    twilight = twilight_times(daily.sunrise, sunset_str, latitude)
     return SunsetInfo(
         sunset_time=sunset_str,
         probability=score,
@@ -171,6 +251,10 @@ def compute_sunset_probability(
         reason=reason,
         cloud_cover_at_sunset=avg_cloud,
         tips=tips,
+        golden_morning=twilight["golden_morning"],
+        golden_evening=twilight["golden_evening"],
+        blue_morning=twilight["blue_morning"],
+        blue_evening=twilight["blue_evening"],
     )
 
 

@@ -106,7 +106,9 @@ class GlowMapService:
                 return None
             today = daily[0]
             tomorrow = daily[1] if len(daily) > 1 else today
-            sunset = compute_sunset_probability(today, today.sunset, today.hours)
+            sunset = compute_sunset_probability(
+                today, today.sunset, today.hours, latitude=loc.latitude
+            )
             rec = self._rec._sunrise(tomorrow)
             sunrise_score = float(rec.score) if rec else 0.0
             sunrise_level = rec.level if rec else "一般"

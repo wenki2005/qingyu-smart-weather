@@ -92,6 +92,10 @@ class SunsetInfo:
     reason: str = ""
     cloud_cover_at_sunset: Optional[float] = None
     tips: str = ""
+    golden_morning: Optional[str] = None   # 金色时刻（日出前后）
+    golden_evening: Optional[str] = None   # 金色时刻（日落前后）
+    blue_morning: Optional[str] = None     # 蓝调时刻（日出前）
+    blue_evening: Optional[str] = None     # 蓝调时刻（日落后）
 
 
 @dataclass

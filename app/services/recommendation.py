@@ -31,11 +31,13 @@ NORMAL = 50
 class RecommendationEngine:
     """观赏推荐引擎。"""
 
-    def recommend(self, daily: DailyWeather, day_label: str = "") -> list[ViewingRecommendation]:
+    def recommend(
+        self, daily: DailyWeather, day_label: str = "", air_quality=None, latitude=None
+    ) -> list[ViewingRecommendation]:
         """对某一天生成全部观赏推荐，按分数降序。"""
         out: list[ViewingRecommendation] = []
         out.append(self._sunrise(daily))
-        out.append(self._sunset(daily))
+        out.append(self._sunset(daily, air_quality=air_quality, latitude=latitude))
         out.append(self._stargazing(daily))
         out.append(self._rainbow(daily))
         out.append(self._cloud_scene(daily))
@@ -76,8 +78,12 @@ class RecommendationEngine:
             tips="提前 20 分钟到达，朝霞常在日出前一刻最绚烂。",
         )
 
-    def _sunset(self, daily: DailyWeather) -> Optional[ViewingRecommendation]:
-        info = compute_sunset_probability(daily, daily.sunset, daily.hours)
+    def _sunset(
+        self, daily: DailyWeather, air_quality=None, latitude=None
+    ) -> Optional[ViewingRecommendation]:
+        info = compute_sunset_probability(
+            daily, daily.sunset, daily.hours, air_quality=air_quality, latitude=latitude
+        )
         return ViewingRecommendation(
             category=VIEWING_SUNSET,
             title="晚霞 / 日落",

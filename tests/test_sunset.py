@@ -94,3 +94,31 @@ def test_air_pollution_reduces_sunset_score():
     clean = compute_sunset_probability(day, day.sunset, day.hours, AirQuality(aqi=25, pm25=10))
     polluted = compute_sunset_probability(day, day.sunset, day.hours, AirQuality(aqi=180, pm25=180))
     assert polluted.probability < clean.probability
+
+
+
+def test_twilight_times_use_solar_altitude_ranges():
+    from app.services.sunset import twilight_times
+    result = twilight_times("2026-08-08T05:20", "2026-08-08T19:20", latitude=30.0)
+    assert result["golden_morning"] < result["golden_evening"]
+    assert result["blue_morning"].split("-")[1] == result["golden_morning"].split("-")[0]
+    assert result["golden_evening"].split("-")[1] == result["blue_evening"].split("-")[0]
+    assert result["golden_morning"].split("-")[0] < "05:20"
+    assert result["golden_morning"].split("-")[1] > "05:20"
+    assert result["golden_evening"].split("-")[0] < "19:20"
+    assert result["golden_evening"].split("-")[1] > "19:20"
+
+
+def test_twilight_times_change_with_latitude():
+    from app.services.sunset import twilight_times
+    low = twilight_times("2026-06-21T05:00", "2026-06-21T19:00", latitude=20.0)
+    high = twilight_times("2026-06-21T04:00", "2026-06-21T20:00", latitude=50.0)
+    assert low["golden_morning"] != high["golden_morning"]
+
+
+def test_twilight_times_missing_or_polar_data_returns_none():
+    from app.services.sunset import twilight_times
+    assert all(value is None for value in twilight_times(None, None).values())
+    # 极昼时太阳不会穿过 -6°，不能伪造一个蓝调时刻。
+    polar = twilight_times("2026-06-21T00:00", "2026-06-21T23:59", latitude=89.0)
+    assert all(value is None for value in polar.values())

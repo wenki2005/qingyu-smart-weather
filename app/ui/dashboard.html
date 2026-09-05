@@ -139,7 +139,7 @@ body{
 .official .of-tag{color:var(--faint);margin-right:6px}
 .aqi .badge{font-family:var(--mono);font-weight:700;padding:3px 10px;border-radius:99px;
   border:1px solid currentColor}
-.sunline{display:flex;gap:22px;margin-top:12px;padding-top:12px;
+.sunline{display:flex;gap:22px;flex-wrap:wrap;margin-top:12px;padding-top:12px;
   border-top:1px dashed rgba(150,190,230,.16);font-family:var(--mono);font-size:12px;
   color:var(--dim);letter-spacing:.06em}
 .sunline b{color:var(--gold);font-weight:600}
@@ -576,6 +576,10 @@ function render(d){
   }
   $("official").innerHTML = offHtml;
   $("sunline").innerHTML = `<span>日出 <b>${t.sunrise}</b></span><span>日落 <b>${t.sunset}</b></span>
+    ${d.sunset.golden_morning?`<span style="color:var(--gold)">金色时刻（晨） <b>${d.sunset.golden_morning}</b></span>`:""}
+    ${d.sunset.blue_morning?`<span style="color:var(--ice)">蓝调时刻（晨） <b>${d.sunset.blue_morning}</b></span>`:""}
+    ${d.sunset.golden_evening?`<span style="color:var(--gold)">金色时刻（晚） <b>${d.sunset.golden_evening}</b></span>`:""}
+    ${d.sunset.blue_evening?`<span style="color:var(--ice)">蓝调时刻（晚） <b>${d.sunset.blue_evening}</b></span>`:""}
     <span>更新 ${d.generated_at}</span>`;
   // 晚霞环
   const p = d.sunset.probability||0;
