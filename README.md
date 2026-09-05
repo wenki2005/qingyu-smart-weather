@@ -8,6 +8,7 @@
 > + 中央气象台在线预警与台风路径（均免费、无需 Key）。
 >
 > 🔗 GitHub：https://github.com/wenki2005/qingyu-smart-weather
+> 📘 完整项目说明：[项目完整说明.md](项目完整说明.md)；历史改动记录：[更新说明.md](更新说明.md)
 
 ---
 
@@ -153,7 +154,7 @@ PM2.5 参与天空通透度修正；降水概率 ≥70% 或日落窗口出现雷
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests -v        # 120 个单元测试
+pytest tests -v        # 当前 123 个单元测试
 ruff check app/ tests/ weather_desktop.py   # 代码检查零告警
 ```
 
